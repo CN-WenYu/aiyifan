@@ -3,6 +3,7 @@
     <cloud-backup>
         <exclude domain="sharedpref" path="offline_download_failures.xml" />
         <exclude domain="file" path="offline_downloads/" />
+        <exclude domain="file" path="offline_download_metadata/" />
         <exclude domain="database" path="exoplayer_internal.db" />
         <exclude domain="database" path="exoplayer_internal.db-wal" />
         <exclude domain="database" path="exoplayer_internal.db-shm" />
@@ -11,6 +12,7 @@
     <device-transfer>
         <exclude domain="sharedpref" path="offline_download_failures.xml" />
         <exclude domain="file" path="offline_downloads/" />
+        <exclude domain="file" path="offline_download_metadata/" />
         <exclude domain="database" path="exoplayer_internal.db" />
         <exclude domain="database" path="exoplayer_internal.db-wal" />
         <exclude domain="database" path="exoplayer_internal.db-shm" />

@@ -19,7 +19,14 @@ class DownloadFailureTest {
     @Test fun `expired and missing resources have distinct actionable errors`() {
         fun response(code: Int) = HttpDataSource.InvalidResponseCodeException(code, "http", IOException(), emptyMap(), DataSpec.Builder().setUri("https://invalid/test").build(), byteArrayOf())
         assertEquals(DownloadFailure.EXPIRED, DownloadFailure.from(response(403)))
+        assertEquals(DownloadFailure.EXPIRED, DownloadFailure.from(DownloadPreparationException(response(403))))
         assertEquals(DownloadFailure.NOT_FOUND, DownloadFailure.from(response(404)))
         assertEquals(DownloadFailure.NETWORK, DownloadFailure.from(IOException("offline")))
+    }
+
+    @Test fun `unsupported sources retain specific preparation failures through wrappers`() {
+        assertEquals(DownloadFailure.LIVE, DownloadFailure.from(IOException(DownloadPreparationException(IOException(), DownloadFailure.LIVE))))
+        assertEquals(DownloadFailure.DRM, DownloadFailure.from(DownloadPreparationException(IOException(), DownloadFailure.DRM)))
+        assertEquals(DownloadFailure.PREPARATION, DownloadFailure.from(DownloadPreparationException(IOException())))
     }
 }

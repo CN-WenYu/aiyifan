@@ -145,7 +145,10 @@ class OfflineDownloadDeviceTest {
                     var rendered = false
                     scenario.onActivity {
                         val list = it.findViewById<androidx.recyclerview.widget.RecyclerView>(com.aiyifan.app.R.id.recycler)
-                        rendered = list.adapter?.itemCount == 3 && list.childCount == 3
+                        val expectedFilms = AppGraph.downloadRepository.tasks.value
+                            .filter { it.download.state == Download.STATE_COMPLETED }
+                            .mapNotNull { it.metadata?.detail?.mediaKey }.distinct().size
+                        rendered = list.adapter?.itemCount == expectedFilms && list.childCount > 0
                     }
                     rendered
                 }
@@ -177,7 +180,9 @@ class OfflineDownloadDeviceTest {
         val detail = VideoDetail("offline-pause-fixture", "下载状态验证", "", 1, episodes = listOf(episode))
         val id = downloadId(detail.mediaKey, episode.episodeKey)
         try {
-            withContext(Dispatchers.Main) { repository.setMobileDataAllowed(true); repository.enqueue(detail, episode); repository.pause(id) }
+            withContext(Dispatchers.Main) { repository.setMobileDataAllowed(true); repository.enqueue(detail, episode) }
+            await { (repository.get(id)?.bytesDownloaded ?: 0) > 0 }
+            withContext(Dispatchers.Main) { repository.pause(id) }
             await { repository.get(id)?.download?.stopReason == OfflineDownloadRepository.STOP_REASON_USER }
             assertEquals(OfflineDownloadRepository.STOP_REASON_USER, withContext(Dispatchers.IO) { repository.manager.downloadIndex.getDownload(id)!!.stopReason })
             withContext(Dispatchers.Main) { repository.pauseForTimeout() }
@@ -198,7 +203,7 @@ class OfflineDownloadDeviceTest {
     }
 
     @Test(timeout = 120_000)
-    fun failedSegmentsRetryWithFreshUrlAndLiveSourcesNeverEnterQueue() = runBlocking {
+    fun failedSegmentsRetryWithFreshUrlAndLiveSourcesFailWithExplicitReason() = runBlocking {
         val server = FixtureServer(instrumentation.context)
         var freshUrl = server.url("/download/aes/index.m3u8?version=old")
         var resolveFails = false
@@ -220,26 +225,21 @@ class OfflineDownloadDeviceTest {
             withContext(Dispatchers.Main) { repository.enqueue(detail, episode) }
             await { repository.get(id)?.download?.state == Download.STATE_FAILED }
             assertEquals(com.aiyifan.app.core.download.DownloadFailure.EXPIRED, repository.get(id)?.failure)
-            val oldRequest = repository.get(id)!!.download.request
             resolveFails = true
-            try {
-                withContext(Dispatchers.Main) { repository.retry(id) }
-                fail("Failed re-resolution must propagate")
-            } catch (_: java.io.IOException) { }
-            assertEquals(oldRequest, repository.get(id)!!.download.request)
+            withContext(Dispatchers.Main) { repository.retry(id) }
+            await { repository.get(id)?.download?.state == Download.STATE_FAILED }
+            assertEquals(com.aiyifan.app.core.download.DownloadFailure.PREPARATION, repository.get(id)?.failure)
             resolveFails = false
             server.rejectLaterSegments = false
             freshUrl = server.url("/download/aes/index.m3u8?version=new")
             withContext(Dispatchers.Main) { repository.retry(id) }
             await { repository.get(id)?.download?.state == Download.STATE_COMPLETED }
-            assertEquals(freshUrl, repository.get(id)!!.download.request.uri.toString())
+            assertEquals(freshUrl, withContext(Dispatchers.Main) { repository.offlineRequest(id).uri.toString() })
             withContext(Dispatchers.Main) { repository.remove(id) }
             freshUrl = server.url("/download/live.m3u8")
-            try {
-                withContext(Dispatchers.Main) { repository.enqueue(detail, episode) }
-                fail("Live content must be rejected")
-            } catch (_: java.io.IOException) { }
-            assertNull(withContext(Dispatchers.IO) { repository.manager.downloadIndex.getDownload(id) })
+            withContext(Dispatchers.Main) { repository.enqueue(detail, episode) }
+            await { repository.get(id)?.download?.state == Download.STATE_FAILED }
+            assertEquals(com.aiyifan.app.core.download.DownloadFailure.LIVE, repository.get(id)?.failure)
         } finally {
             withContext(Dispatchers.Main) { repository.remove(id); repository.setMobileDataAllowed(previousNetwork) }
             server.close()
@@ -247,7 +247,7 @@ class OfflineDownloadDeviceTest {
     }
 
     @Test(timeout = 30_000)
-    fun preparationMakesNoRequestsWhenUnmeteredRequirementIsUnmet() = runBlocking {
+    fun queuePersistsWithoutRequestsUntilPermittedNetworkAndCanBeDeletedWhileWaiting() = runBlocking {
         val requirements = androidx.media3.exoplayer.scheduler.Requirements(androidx.media3.exoplayer.scheduler.Requirements.NETWORK_UNMETERED)
         org.junit.Assume.assumeTrue(requirements.getNotMetRequirements(context) != 0)
         val server = FixtureServer(instrumentation.context)
@@ -260,16 +260,26 @@ class OfflineDownloadDeviceTest {
         val previousNetwork = repository.mobileDataAllowed
         val episode = Episode("network", "等待 Wi-Fi", 0, server.url("/download/master.m3u8"))
         val detail = VideoDetail("offline-network-fixture", "网络限制", "", 1, episodes = listOf(episode))
+        val id = downloadId(detail.mediaKey, episode.episodeKey)
         try {
             withContext(Dispatchers.Main) { repository.setMobileDataAllowed(false) }
-            val pending = launch { repository.enqueue(detail, episode) }
+            withTimeout(3_000) { repository.enqueue(detail, episode) }
             delay(1200)
             assertEquals(0, resolves)
             assertTrue(server.requests.isEmpty())
-            pending.cancelAndJoin()
-            assertNull(withContext(Dispatchers.IO) { repository.manager.downloadIndex.getDownload(downloadId(detail.mediaKey, episode.episodeKey)) })
+            assertNotNull(withContext(Dispatchers.IO) { repository.manager.downloadIndex.getDownload(id) })
+            withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
+            assertNotNull(AppGraph.downloadRepository.get(id))
+            assertEquals(-1f, repository.get(id)!!.percentDownloaded, 0f)
+            assertEquals(id, repository.enqueue(detail, episode))
+            withContext(Dispatchers.Main) { repository.remove(id) }
+            assertNull(withContext(Dispatchers.IO) { repository.manager.downloadIndex.getDownload(id) })
+            assertEquals(0, resolves)
+            withContext(Dispatchers.Main) { repository.enqueue(detail, episode); repository.setMobileDataAllowed(true) }
+            await { repository.get(id)?.download?.state == Download.STATE_COMPLETED }
+            assertEquals(1, resolves)
         } finally {
-            withContext(Dispatchers.Main) { repository.setMobileDataAllowed(previousNetwork) }
+            withContext(Dispatchers.Main) { repository.remove(id); repository.setMobileDataAllowed(previousNetwork) }
             server.close()
         }
     }

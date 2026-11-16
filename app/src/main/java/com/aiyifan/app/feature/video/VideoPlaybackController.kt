@@ -577,7 +577,7 @@ private class Media3PlaybackEngine(
         pendingInitialSeek = true
         player.setMediaSource(
             DefaultMediaSourceFactory(repository.offlineDataSourceFactory(downloadId))
-                .createMediaSource(task.download.request.toMediaItem()),
+                .createMediaSource(repository.offlineRequest(downloadId).toMediaItem()),
         )
     }
 

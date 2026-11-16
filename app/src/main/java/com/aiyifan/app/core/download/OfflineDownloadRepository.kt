@@ -46,6 +46,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -70,16 +71,17 @@ class OfflineDownloadRepository(
     // Error annotations only; task existence, state and progress always come from DownloadIndex.
     private val failureNotes = this.context.getSharedPreferences("offline_download_failures", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val mutations = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
-    private fun mutation(id: String) = mutations.getOrPut(id) { Mutex() }
+    private fun mutation(id: String) = runtime.mutations.getOrPut(id) { Mutex() }
     private val refreshLock = Mutex()
     private val initialized = CompletableDeferred<Unit>()
     private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     val tasks: StateFlow<List<DownloadTask>> = mutableTasks.asStateFlow()
     val mobileDataAllowed: Boolean get() = preferences.getBoolean("mobile_data_allowed", false)
+    val isWaitingForNetwork: Boolean get() = requirements().getNotMetRequirements(context) != 0
 
     init {
         checkMainThread()
+        if (runtime.defaultPreparer == null) runtime.defaultPreparer = ::resolveAndPrepare
         manager.addListener(object : DownloadManager.Listener {
             override fun onInitialized(downloadManager: DownloadManager) {
                 initialized.complete(Unit)
@@ -121,16 +123,18 @@ class OfflineDownloadRepository(
             initialized.await()
             val id = downloadId(detail.mediaKey, episode.episodeKey)
             if (readDownload(id) != null) return@withContext id
-            awaitPermittedNetwork()
-            val resolved = catalog.resolveDownload(detail, episode)
-            val metadata = DownloadMetadata(detail, resolved, detail.episodes.indexOfFirst { it.episodeKey == episode.episodeKey }.coerceAtLeast(0))
-            val request = prepareRequest(id, metadata)
-            withContext(NonCancellable) {
-                startService()
-                manager.addDownload(request)
-                manager.resumeDownloads()
-                awaitDownload(id) { it != null }
-                refreshNow()
+            val metadata = DownloadMetadata(detail, episode, detail.episodes.indexOfFirst { it.episodeKey == episode.episodeKey }.coerceAtLeast(0), java.util.UUID.randomUUID().toString())
+            runtime.filmMutation(detail.mediaKey).withLock {
+                withContext(Dispatchers.IO) { runtime.snapshots.saveFilm(detail) }
+                val request = deferredRequest(id, metadata)
+                runtime.preparers[id] = ::resolveAndPrepare
+                withContext(NonCancellable) {
+                    startService()
+                    manager.addDownload(request)
+                    manager.resumeDownloads()
+                    awaitDownload(id) { it != null }
+                    refreshNow()
+                }
             }
             id
         }
@@ -157,22 +161,15 @@ class OfflineDownloadRepository(
             if (previous.state == Download.STATE_COMPLETED) return@withContext
             val metadata = DownloadMetadata.decode(previous.request.data)
                 ?: throw IOException(context.getString(R.string.download_error_metadata))
-            if (requirements().getNotMetRequirements(context) != 0) throw DownloadNetworkUnavailableException()
-            // Strict resolution must succeed before touching the old request or any cached bytes.
-            val resolved = catalog.resolveDownload(metadata.detail, metadata.episode)
-            val updated = metadata.copy(episode = resolved)
-            val changed = requiresDownloadReplacement(previous.request.uri.toString(), requireNotNull(resolved.mediaUrl))
-            val request = if (changed) prepareRequest(id, updated) else DownloadRequest.Builder(id, previous.request.uri)
-                .setMimeType(previous.request.mimeType)
-                .setStreamKeys(previous.request.streamKeys)
-                .setCustomCacheKey(previous.request.customCacheKey)
-                .setData(updated.encode()).build()
+            // Preserve the previous resolved request/cache until fresh resolution succeeds.
+            if (!isDeferred(previous.request)) withContext(Dispatchers.IO) { runtime.snapshots.saveSource(null, previous.request) }
+            val request = deferredRequest(id, metadata.copy(generation = java.util.UUID.randomUUID().toString()))
+            runtime.preparers[id] = ::resolveAndPrepare
             withContext(NonCancellable) {
                 startService()
-                if (changed) removeAndAwait(id)
                 manager.addDownload(request, Download.STOP_REASON_NONE)
                 manager.resumeDownloads()
-                awaitDownload(id) { it != null && it.state != Download.STATE_REMOVING }
+                awaitDownload(id) { it != null && it.request.data.contentEquals(request.data) && it.state != Download.STATE_REMOVING }
                 refreshNow()
             }
         }
@@ -182,16 +179,46 @@ class OfflineDownloadRepository(
         // Once requested, removal continues to a persisted Media3 removal even if a screen closes.
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             initialized.await()
-            if (readDownload(id) == null) return@withContext
-            startService()
-            removeAndAwait(id)
-            refreshNow()
+            val previous = readDownload(id) ?: return@withContext
+            val mediaKey = DownloadMetadata.decode(previous.request.data)?.detail?.mediaKey
+            runtime.filmMutation(mediaKey ?: id).withLock {
+                startService()
+                removeAndAwait(id)
+                refreshNow()
+                if (mediaKey != null && tasks.value.none { it.metadata?.detail?.mediaKey == mediaKey }) {
+                    withContext(Dispatchers.IO) { runtime.snapshots.removeFilm(mediaKey) }
+                }
+            }
         }
     }
 
     suspend fun awaitLoaded() = withContext(Dispatchers.Main.immediate) { refreshNow() }
 
     fun get(id: String): DownloadTask? = tasks.value.firstOrNull { it.id == id }
+
+    fun filmSnapshot(mediaKey: String): VideoDetail? = runtime.snapshots.cachedFilm(mediaKey)
+    fun rememberFilm(detail: VideoDetail) {
+        scope.launch {
+            runtime.filmMutation(detail.mediaKey).withLock {
+                awaitLoaded()
+                if (tasks.value.any { it.metadata?.detail?.mediaKey == detail.mediaKey }) {
+                    try {
+                        withContext(Dispatchers.IO) { runtime.snapshots.saveFilm(detail) }
+                        refreshNow()
+                    } catch (_: IOException) { /* Existing offline entries remain usable without enrichment. */ }
+                }
+            }
+        }
+    }
+    fun posterFile(mediaKey: String): File? = runtime.snapshots.poster(mediaKey)
+    fun offlineRequest(id: String): DownloadRequest {
+        val task = requireNotNull(get(id))
+        check(task.download.state == Download.STATE_COMPLETED)
+        if (!isDeferred(task.download.request)) return task.download.request
+        val prepared = requireNotNull(runtime.snapshots.source(id)) { "Offline source snapshot is missing" }
+        check(prepared.generation == DownloadMetadata.decode(task.download.request.data)?.generation)
+        return prepared.request
+    }
 
     fun completed(mediaKey: String): List<DownloadTask> = tasks.value.filter {
         it.download.state == Download.STATE_COMPLETED && it.metadata?.detail?.mediaKey == mediaKey
@@ -220,11 +247,6 @@ class OfflineDownloadRepository(
         }
     }
 
-    private suspend fun awaitPermittedNetwork() {
-        // Preparation can read keys and probe segments too, so it follows the download policy.
-        while (requirements().getNotMetRequirements(context) != 0) delay(500)
-    }
-
     fun pauseForTimeout() {
         checkMainThread()
         // Global pause suppresses helper restart immediately; per-item reasons survive process death.
@@ -248,10 +270,20 @@ class OfflineDownloadRepository(
             return@withLock
         }
         val active = manager.currentDownloads.associateBy { it.request.id }
-        mutableTasks.value = persisted.map { active[it.request.id] ?: it }
-            .map { download -> DownloadTask(download, DownloadMetadata.decode(download.request.data), failure =
-                failureNotes.getString(download.request.id, null)?.let { name -> DownloadFailure.entries.firstOrNull { it.name == name } }) }
-            .sortedByDescending { it.download.startTimeMs }
+        mutableTasks.value = withContext(Dispatchers.IO) {
+            persisted.map { active[it.request.id] ?: it }.map { download ->
+                val original = DownloadMetadata.decode(download.request.data)
+                val prepared = if (isDeferred(download.request)) runtime.snapshots.source(download.request.id)
+                    ?.takeIf { it.generation == original?.generation }?.request else download.request
+                val metadata = prepared?.let { DownloadMetadata.decode(it.data) } ?: original
+                metadata?.detail?.mediaKey?.let(runtime.snapshots::film)
+                DownloadTask(download, metadata,
+                    percentDownloaded = if (prepared == null) -1f else download.percentDownloaded,
+                    failure = failureNotes.getString(download.request.id, null)
+                    ?.let { name -> DownloadFailure.entries.firstOrNull { it.name == name } },
+                    preparing = prepared == null && download.state == Download.STATE_DOWNLOADING)
+            }.sortedByDescending { it.download.startTimeMs }
+        }
     }
 
     private suspend fun readDownload(id: String): Download? =
@@ -271,7 +303,9 @@ class OfflineDownloadRepository(
         // Remove orphan spans too if a damaged/missing manifest prevented Media3 from listing them.
         withContext(Dispatchers.IO) {
             runtime.cache.keys.filter { it.startsWith(taskCachePrefix(id)) }.forEach(runtime.cache::removeResource)
+            runtime.snapshots.removeSource(id)
         }
+        runtime.preparers.remove(id)
     }
 
     private fun requirements(): Requirements = Requirements(
@@ -282,11 +316,55 @@ class OfflineDownloadRepository(
         DownloadService.startForeground(context, VideoDownloadService::class.java)
     }
 
+    private fun deferredRequest(id: String, metadata: DownloadMetadata) = DownloadRequest.Builder(id,
+        Uri.Builder().scheme("offline-task").authority("queued").appendPath(id).build()).setData(metadata.encode()).build()
+
+    private suspend fun resolveAndPrepare(request: DownloadRequest): DownloadRequest = withContext(Dispatchers.Main.immediate) {
+        val original = DownloadMetadata.decode(request.data) ?: throw IOException("Missing download metadata")
+        try {
+            val resolved = catalog.resolveDownload(original.detail, original.episode)
+            val prepared = prepareRequest(request.id, original.copy(episode = resolved))
+            cachePoster(original.detail)
+            prepared
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: DownloadPreparationException) { throw error }
+        catch (error: Exception) { throw DownloadPreparationException(error) }
+    }
+
+    private suspend fun cachePoster(detail: VideoDetail) = withContext(Dispatchers.IO) {
+        if (runtime.snapshots.poster(detail.mediaKey) != null || !detail.coverUrl.startsWith("https://")) return@withContext
+        try {
+            val connection = java.net.URL(detail.coverUrl).openConnection() as java.net.HttpURLConnection
+            try {
+                connection.connectTimeout = 4_000
+                connection.readTimeout = 4_000
+                if (connection.responseCode !in 200..299) return@withContext
+                val bytes = connection.inputStream.use { input ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        if (output.size() + count > 2 * 1024 * 1024) return@withContext
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray()
+                }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                if (bounds.outWidth > 0 && bounds.outHeight > 0) runtime.snapshots.savePoster(detail.mediaKey, bytes)
+            } finally { connection.disconnect() }
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (_: Exception) { /* A poster failure never fails the video download. */ }
+    }
+
     private suspend fun prepareRequest(id: String, metadata: DownloadMetadata): DownloadRequest {
         val uri = Uri.parse(metadata.episode.mediaUrl)
-        require(uri.scheme == "https" || uri.scheme == "http") { context.getString(R.string.download_error_source) }
+        requireDownload(uri.scheme == "https" || uri.scheme == "http", DownloadFailure.SOURCE)
         val type = Util.inferContentType(uri)
-        require(type == C.CONTENT_TYPE_HLS || type == C.CONTENT_TYPE_OTHER) { context.getString(R.string.download_error_format) }
+        requireDownload(type == C.CONTENT_TYPE_HLS || type == C.CONTENT_TYPE_OTHER, DownloadFailure.FORMAT)
         val item = MediaItem.Builder().setUri(uri).apply {
             if (type == C.CONTENT_TYPE_HLS) setMimeType(MimeTypes.APPLICATION_M3U8)
         }.build()
@@ -311,16 +389,15 @@ class OfflineDownloadRepository(
                             if (!continuation.isActive) return
                             try {
                                 val manifest = helper.manifest as? HlsManifest
-                                require(manifest == null || manifest.mediaPlaylist.hasEndTag) { context.getString(R.string.download_error_live) }
-                                require(manifest == null || (manifest.mediaPlaylist.protectionSchemes == null && manifest.multivariantPlaylist.sessionKeyDrmInitData.isEmpty())) {
-                                    context.getString(R.string.download_error_drm)
-                                }
+                                requireDownload(manifest == null || manifest.mediaPlaylist.hasEndTag, DownloadFailure.LIVE)
+                                requireDownload(manifest == null || (manifest.mediaPlaylist.protectionSchemes == null &&
+                                    manifest.multivariantPlaylist.sessionKeyDrmInitData.isEmpty()), DownloadFailure.DRM)
                                 var hasSelectedAudioVideo = false
                                 for (period in 0 until helper.periodCount) {
                                     val groups = helper.getTrackGroups(period)
                                     for (group in 0 until groups.length) {
                                         for (track in 0 until groups[group].length) {
-                                            require(groups[group].getFormat(track).drmInitData == null) { context.getString(R.string.download_error_drm) }
+                                            requireDownload(groups[group].getFormat(track).drmInitData == null, DownloadFailure.DRM)
                                         }
                                     }
                                     val mapped = helper.getMappedTrackInfo(period)
@@ -330,10 +407,10 @@ class OfflineDownloadRepository(
                                         }
                                     }
                                 }
-                                require(hasSelectedAudioVideo) { context.getString(R.string.download_error_tracks) }
+                                requireDownload(hasSelectedAudioVideo, DownloadFailure.TRACKS)
                                 val request = helper.getDownloadRequest(id, metadata.encode())
                                 // Empty HLS stream keys mean "download all", so reject instead of silently downloading every variant.
-                                require(type != C.CONTENT_TYPE_HLS || request.streamKeys.isNotEmpty()) { context.getString(R.string.download_error_tracks) }
+                                requireDownload(type != C.CONTENT_TYPE_HLS || request.streamKeys.isNotEmpty(), DownloadFailure.TRACKS)
                                 continuation.resume(request)
                             } catch (error: Exception) {
                                 continuation.resumeWithException(error)
@@ -341,7 +418,8 @@ class OfflineDownloadRepository(
                         }
                         override fun onPrepareError(helper: DownloadHelper, e: IOException) {
                             if (continuation.isActive) continuation.resumeWithException(
-                                IOException(context.getString(if (e is DownloadHelper.LiveContentUnsupportedException) R.string.download_error_live else R.string.download_error_prepare)),
+                                DownloadPreparationException(e, if (e is DownloadHelper.LiveContentUnsupportedException)
+                                    DownloadFailure.LIVE else DownloadFailure.PREPARATION),
                             )
                         }
                     })
@@ -354,6 +432,10 @@ class OfflineDownloadRepository(
 
     private fun checkMainThread() = check(Looper.myLooper() == Looper.getMainLooper())
 
+    private fun requireDownload(condition: Boolean, failure: DownloadFailure) {
+        if (!condition) throw DownloadPreparationException(IllegalArgumentException(failure.name), failure)
+    }
+
     companion object {
         const val STOP_REASON_USER = 1
         const val STOP_REASON_TIMEOUT = 2
@@ -365,13 +447,24 @@ private class DownloadRuntime private constructor(context: Context) {
     val upstream = DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(20_000)
     private val database = StandaloneDatabaseProvider(context)
     val cache = SimpleCache(File(context.filesDir, "offline_downloads"), NoOpCacheEvictor(), database)
+    val snapshots = DownloadSnapshotStore(File(context.filesDir, "offline_download_metadata"))
+    val mutations = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    private val filmMutations = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    fun filmMutation(mediaKey: String) = filmMutations.getOrPut(mediaKey) { Mutex() }
+    var defaultPreparer: (suspend (DownloadRequest) -> DownloadRequest)? = null
+    val preparers = java.util.concurrent.ConcurrentHashMap<String, suspend (DownloadRequest) -> DownloadRequest>()
     private val executor = Executors.newFixedThreadPool(2)
     val manager = DownloadManager(context, DefaultDownloadIndex(database), DownloaderFactory { request ->
-        DefaultDownloaderFactory(
+        val factory = DefaultDownloaderFactory(
             CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstream)
                 .setCacheKeyFactory(taskCacheKeys(request.id)),
             executor,
-        ).createDownloader(request)
+        )
+        if (isDeferred(request)) DeferredDownloader(request, snapshots,
+            { queued -> requireNotNull(preparers[queued.id] ?: defaultPreparer).invoke(queued) },
+            factory::createDownloader,
+            { cache.keys.filter { it.startsWith(taskCachePrefix(request.id)) }.forEach(cache::removeResource) })
+        else factory.createDownloader(request)
     }).apply {
         maxParallelDownloads = 2
         minRetryCount = 2
@@ -391,3 +484,5 @@ private fun taskCacheKeys(id: String) = CacheKeyFactory { spec ->
 }
 
 private fun taskCachePrefix(id: String) = "${id.length}:$id:"
+
+private fun isDeferred(request: DownloadRequest) = request.uri.scheme == "offline-task"

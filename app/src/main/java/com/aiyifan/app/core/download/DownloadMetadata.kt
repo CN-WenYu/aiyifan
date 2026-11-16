@@ -21,14 +21,17 @@ data class DownloadTask(
     val bytesDownloaded: Long = download.bytesDownloaded,
     val percentDownloaded: Float = download.percentDownloaded,
     val failure: DownloadFailure? = null,
+    val preparing: Boolean = false,
 ) {
     val id: String get() = download.request.id
 }
 
 /** Only an offline playback snapshot is stored; favorites, history and unrelated episodes stay out. */
-data class DownloadMetadata(val detail: VideoDetail, val episode: Episode, val episodeOrder: Int) {
+data class DownloadMetadata(val detail: VideoDetail, val episode: Episode, val episodeOrder: Int,
+    val generation: String? = null) {
     fun encode(): ByteArray = JSONObject().apply {
-        put("version", 1)
+        put("version", 2)
+        put("generation", generation)
         put("mediaKey", detail.mediaKey)
         put("title", detail.title)
         put("coverUrl", detail.coverUrl)
@@ -51,13 +54,13 @@ data class DownloadMetadata(val detail: VideoDetail, val episode: Episode, val e
     companion object {
         fun decode(data: ByteArray): DownloadMetadata? = runCatching {
             val json = JSONObject(data.toString(Charsets.UTF_8))
-            require(json.getInt("version") == 1)
+            require(json.getInt("version") in 1..2)
             val value = json.getJSONObject("episode")
             val episode = Episode(
                 episodeKey = value.getString("episodeKey"),
                 episodeTitle = value.getString("episodeTitle"),
                 uniqueId = value.getInt("uniqueId"),
-                mediaUrl = value.getString("mediaUrl"),
+                mediaUrl = value.optionalString("mediaUrl"),
                 resolution = value.optionalString("resolution"),
                 lang = value.optionalString("lang"),
                 duration = value.optionalString("duration"),
@@ -72,8 +75,10 @@ data class DownloadMetadata(val detail: VideoDetail, val episode: Episode, val e
                 videoType = json.getInt("videoType"),
                 episodes = listOf(episode),
             )
-            require(detail.mediaKey.isNotBlank() && episode.episodeKey.isNotBlank() && !episode.mediaUrl.isNullOrBlank())
-            DownloadMetadata(detail, episode, json.getInt("episodeOrder"))
+            val generation = json.optionalString("generation")
+            require(detail.mediaKey.isNotBlank() && episode.episodeKey.isNotBlank() &&
+                (generation != null || !episode.mediaUrl.isNullOrBlank()))
+            DownloadMetadata(detail, episode, json.getInt("episodeOrder"), generation)
         }.getOrNull()
 
         private fun JSONObject.optionalString(key: String): String? =

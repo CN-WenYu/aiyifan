@@ -284,6 +284,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                 .onSuccess { loadedDetail ->
                     if (playbackController.requestedMediaKey != mediaKey || playbackController.isOffline) return@onSuccess
                     detail = loadedDetail
+                    AppGraph.downloadRepository.rememberFilm(loadedDetail)
                     renderDetail(loadedDetail)
                     AppGraph.catalogRepository.markFavoriteEpisodesKnown(loadedDetail)
                     val history = AppGraph.catalogRepository.getHistory().firstOrNull { it.mediaKey == mediaKey }
