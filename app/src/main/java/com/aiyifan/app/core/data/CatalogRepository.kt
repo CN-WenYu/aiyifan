@@ -57,6 +57,10 @@ interface CatalogRepository {
 
     suspend fun getVideoDetail(mediaKey: String): VideoDetail
 
+    /** Resolves a fresh remote source for offline use without sample or stale-source fallback. */
+    suspend fun resolveDownload(detail: VideoDetail, episode: Episode): Episode =
+        throw UnsupportedOperationException("Download source resolution is unavailable")
+
     suspend fun resolvePlayback(
         detail: VideoDetail,
         episode: Episode,

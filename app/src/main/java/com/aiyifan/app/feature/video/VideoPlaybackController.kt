@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn as AndroidxOptIn
 import androidx.media3.datasource.DefaultDataSource
+import com.aiyifan.app.core.download.OfflineDownloadRepository
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -27,6 +28,10 @@ interface PlaybackEngine {
     val hasEnded: Boolean get() = false
     val currentPosition: Long
     val duration: Long
+
+    val hasPlaybackError: Boolean get() = false
+
+    fun setOfflineMedia(downloadId: String) { error("Offline playback is unavailable") }
 
     fun setMediaUrl(mediaUrl: String)
 
@@ -56,6 +61,7 @@ interface PlaybackSession {
 data class ActivePlaybackSession(
     val detail: VideoDetail,
     val episode: Episode,
+    val offlineDownloadId: String? = null,
 )
 
 sealed interface EpisodeSwitchResult {
@@ -73,6 +79,7 @@ class VideoPlaybackController(
     private val canPlay: () -> Boolean = { true },
     private val skipIntro: () -> Boolean = { false },
     private val clock: () -> Long = System::currentTimeMillis,
+    private val offlineCatalog: OfflinePlaybackCatalog? = null,
     monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     private val sleepTimer = SleepTimer(monotonicClock)
@@ -100,6 +107,17 @@ class VideoPlaybackController(
         pause()
         return true
     }
+
+    var wasOfflineDownloadRemoved: Boolean = false
+        private set
+    var selectionToken: Long = 0L
+        private set
+    private var offlineLoadFailed = false
+    private var activeOfflineDownloadId: String? = null
+    var requestedOfflineDownloadId: String? = null
+        private set
+    val isOffline: Boolean get() = requestedOfflineDownloadId != null
+    val hasOfflinePlaybackError: Boolean get() = isOffline && (offlineLoadFailed || engine.hasPlaybackError)
 
     private var activeDetail: VideoDetail? = null
     private var activeEpisode: Episode? = null
@@ -143,8 +161,10 @@ class VideoPlaybackController(
     private val removeSeekListener = engine.addSeekListener(::saveHistory)
 
     /** Claims this shared controller when navigating between two video pages. */
-    fun openVideo(mediaKey: String) {
-        if (requestedMediaKey == mediaKey) return
+    fun openVideo(mediaKey: String, offlineDownloadId: String? = null) {
+        if (requestedMediaKey == mediaKey && requestedOfflineDownloadId == offlineDownloadId) return
+        selectionToken++
+        val sourceChanged = requestedOfflineDownloadId != offlineDownloadId
         sleepTimer.onSelection(mediaKey, null)
         saveHistory()
         requestVersion++
@@ -152,12 +172,17 @@ class VideoPlaybackController(
         pendingEpisode = null
         endedAdvanceEpisodeKey = null
         requestedMediaKey = mediaKey
-        if (activeDetail?.mediaKey != mediaKey) {
+        requestedOfflineDownloadId = offlineDownloadId
+        offlineLoadFailed = false
+        if (activeDetail?.mediaKey != mediaKey || sourceChanged) {
             replacingMedia = true
             engine.pause()
             lastPlayWhenReady = false
             replacingMedia = false
             paused = stoppedForSleep || !canPlay()
+            activeDetail = null
+            activeEpisode = null
+            activeOfflineDownloadId = null
         }
     }
 
@@ -185,7 +210,7 @@ class VideoPlaybackController(
 
     val activeSession: ActivePlaybackSession?
         get() = activeDetail?.let { detail ->
-            activeEpisode?.let { episode -> ActivePlaybackSession(detail, episode) }
+            activeEpisode?.let { episode -> ActivePlaybackSession(detail, episode, activeOfflineDownloadId) }
         }
 
     fun prepare(
@@ -193,6 +218,7 @@ class VideoPlaybackController(
         episode: Episode,
         startPositionMs: Long = 0L,
         shouldPlay: Boolean = true,
+        offlineDownloadId: String? = null,
     ): Boolean {
         val mediaUrl = episode.mediaUrl?.trim().orEmpty()
         if (released || mediaUrl.isBlank()) return false
@@ -205,7 +231,10 @@ class VideoPlaybackController(
         endedAdvanceEpisodeKey = null
         replacingMedia = true
         try {
-            engine.setMediaUrl(mediaUrl)
+            if (offlineDownloadId == null) engine.setMediaUrl(mediaUrl) else engine.setOfflineMedia(offlineDownloadId)
+            activeOfflineDownloadId = offlineDownloadId
+            requestedOfflineDownloadId = offlineDownloadId
+            offlineLoadFailed = false
             activeDetail = detail
             activeEpisode = episode
             engine.prepare()
@@ -268,9 +297,11 @@ class VideoPlaybackController(
     suspend fun switchEpisode(offset: Int): EpisodeSwitchResult {
         val detail = activeDetail ?: return EpisodeSwitchResult.Unavailable
         val activeEpisode = activeEpisode ?: return EpisodeSwitchResult.Unavailable
-        val activeIndex = detail.episodes.indexOfFirst { it.episodeKey == activeEpisode.episodeKey }
+        val episodes = if (isOffline) offlineCatalog?.completed(detail.mediaKey)
+            ?.sortedBy { it.episodeOrder }?.map { it.episode }.orEmpty() else detail.episodes
+        val activeIndex = episodes.indexOfFirst { it.episodeKey == activeEpisode.episodeKey }
         if (activeIndex < 0 || offset !in listOf(-1, 1)) return EpisodeSwitchResult.Unavailable
-        val targetEpisode = detail.episodes.getOrNull(activeIndex + offset) ?: return EpisodeSwitchResult.Unavailable
+        val targetEpisode = episodes.getOrNull(activeIndex + offset) ?: return EpisodeSwitchResult.Unavailable
         return loadEpisode(detail, targetEpisode)
     }
 
@@ -304,6 +335,11 @@ class VideoPlaybackController(
     ): EpisodeSwitchResult {
         if (released || isLoading) return EpisodeSwitchResult.Unavailable
         if (requestedMediaKey != null && requestedMediaKey != detail.mediaKey) return EpisodeSwitchResult.Unavailable
+        if (isOffline) {
+            val entry = offlineCatalog?.completed(detail.mediaKey)?.firstOrNull { it.episode.episodeKey == episode.episodeKey }
+                ?: return offlineFailure()
+            return loadOfflineDownload(entry.id, resumePositionMs)
+        }
         sleepTimer.onSelection(detail.mediaKey, episode.episodeKey)
         val version = ++requestVersion
         isLoading = true
@@ -331,6 +367,37 @@ class VideoPlaybackController(
                 pendingEpisode = null
                 notifyState()
             }
+        }
+    }
+
+    /** Uses persisted metadata and completed cache entries only; never resolves a remote URL. */
+    fun loadOfflineDownload(downloadId: String, resumePositionMs: Long = 0L): EpisodeSwitchResult {
+        if (released || isLoading || !isOffline) return EpisodeSwitchResult.Unavailable
+        val entry = offlineCatalog?.get(downloadId) ?: return offlineFailure()
+        if (entry.detail.mediaKey != requestedMediaKey) return offlineFailure()
+        val completed = offlineCatalog?.completed(entry.detail.mediaKey).orEmpty().sortedBy { it.episodeOrder }
+        if (completed.none { it.id == downloadId }) return offlineFailure()
+        val snapshot = entry.detail.copy(episodes = completed.map { it.episode }, related = emptyList())
+        return try {
+            val position = AutoSkipPolicy.initialPositionMs(resumePositionMs, entry.episode.opSecond, skipIntro())
+            if (prepare(snapshot, entry.episode, position, offlineDownloadId = downloadId)) {
+                EpisodeSwitchResult.Switched(entry.episode)
+            } else offlineFailure()
+        } catch (_: Exception) {
+            offlineFailure()
+        }
+    }
+
+    private fun offlineFailure(): EpisodeSwitchResult {
+        offlineLoadFailed = true
+        notifyState()
+        return EpisodeSwitchResult.Failed
+    }
+
+    fun stopOfflineDownload(downloadId: String) {
+        if (activeOfflineDownloadId == downloadId || requestedOfflineDownloadId == downloadId) {
+            wasOfflineDownloadRemoved = true
+            release()
         }
     }
 
@@ -374,6 +441,7 @@ class VideoPlaybackController(
         removeProgressListener()
         removeStateListener()
         removeSeekListener()
+        notifyState()
         stateListeners.clear()
         engine.detach()
         session.release()
@@ -385,6 +453,7 @@ class VideoPlaybackController(
         fun create(
             applicationContext: Context,
             repository: CatalogRepository,
+            downloads: OfflineDownloadRepository? = null,
         ): VideoPlaybackController {
             val player = ExoPlayer.Builder(applicationContext)
                 .setSeekBackIncrementMs(10_000L)
@@ -393,7 +462,8 @@ class VideoPlaybackController(
                 .build()
             val session = MediaSession.Builder(applicationContext, player).build()
             return VideoPlaybackController(
-                engine = Media3PlaybackEngine(player),
+                engine = Media3PlaybackEngine(player, downloads),
+                offlineCatalog = downloads?.let(::RepositoryOfflinePlaybackCatalog),
                 repository = repository,
                 session = Media3PlaybackSession(session),
                 canPlay = { ScreenOffPlaybackObserver.canPlay(applicationContext) },
@@ -422,6 +492,11 @@ class VideoPlaybackControllerProvider(
     private var controller: VideoPlaybackController? = null
 
     @Synchronized
+    fun stopOfflineDownload(id: String) {
+        controller?.stopOfflineDownload(id)
+    }
+
+    @Synchronized
     fun get(): VideoPlaybackController {
         val activeController = controller
         if (activeController != null && !activeController.isReleased) return activeController
@@ -432,6 +507,7 @@ class VideoPlaybackControllerProvider(
 
 private class Media3PlaybackEngine(
     private val player: ExoPlayer,
+    private val downloads: OfflineDownloadRepository?,
 ) : PlaybackEngine {
     private var attachedPlayerView: PlayerView? = null
     private var screenAwakeController: PlaybackScreenAwakeController? = null
@@ -475,6 +551,7 @@ private class Media3PlaybackEngine(
     override val isReady: Boolean
         get() = player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_ENDED
     override val hasEnded: Boolean get() = player.playbackState == Player.STATE_ENDED
+    override val hasPlaybackError: Boolean get() = player.playerError != null
 
     override fun addSeekListener(listener: () -> Unit): () -> Unit {
         seekListeners += listener
@@ -491,6 +568,18 @@ private class Media3PlaybackEngine(
 
     override val duration: Long
         get() = player.duration
+
+    @AndroidxOptIn(markerClass = [UnstableApi::class])
+    override fun setOfflineMedia(downloadId: String) {
+        val repository = requireNotNull(downloads)
+        val task = requireNotNull(repository.get(downloadId))
+        check(task.download.state == androidx.media3.exoplayer.offline.Download.STATE_COMPLETED)
+        pendingInitialSeek = true
+        player.setMediaSource(
+            DefaultMediaSourceFactory(repository.offlineDataSourceFactory(downloadId))
+                .createMediaSource(task.download.request.toMediaItem()),
+        )
+    }
 
     override fun setMediaUrl(mediaUrl: String) {
         pendingInitialSeek = true

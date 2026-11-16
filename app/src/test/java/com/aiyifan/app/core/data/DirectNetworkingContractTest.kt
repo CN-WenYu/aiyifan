@@ -33,7 +33,8 @@ class DirectNetworkingContractTest {
         assertFalse(manifest.contains("feature.proxy"))
         assertFalse(manifest.contains("FOREGROUND_SERVICE_SPECIAL_USE"))
         assertFalse(manifest.contains("CHANGE_NETWORK_STATE"))
-        assertFalse(manifest.contains("ACCESS_NETWORK_STATE"))
+        // Download requirements observe connectivity; they do not change routes or create a VPN.
+        assertFalse(manifest.contains("BIND_VPN_SERVICE"))
     }
 
     @Test

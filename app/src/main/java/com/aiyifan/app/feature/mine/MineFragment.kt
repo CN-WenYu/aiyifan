@@ -103,6 +103,7 @@ class MineFragment : Fragment() {
         binding.collectionButton.setOnClickListener { startActivity(Intent(requireContext(), CollectionActivity::class.java)) }
         binding.hotButton.setOnClickListener { startActivity(Intent(requireContext(), HotActivity::class.java)) }
         binding.localMediaButton.setOnClickListener { startActivity(Intent(requireContext(), LocalMediaActivity::class.java)) }
+        binding.downloadsButton.setOnClickListener { startActivity(Intent(requireContext(), com.aiyifan.app.feature.download.DownloadsActivity::class.java)) }
         binding.themeSettingsButton.setOnClickListener {
             val modes = ThemeMode.entries
             MaterialAlertDialogBuilder(requireContext())

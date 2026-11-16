@@ -11,6 +11,11 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.R
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.setupEdgeToEdge
@@ -22,6 +27,23 @@ import com.aiyifan.app.feature.mine.MineFragment
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
+    private var downloadRecovery: Job? = null
+
+    override fun onStart() {
+        super.onStart()
+        downloadRecovery = lifecycleScope.launch {
+            try { AppGraph.downloadRepository.recoverFromForeground() }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) {
+                android.widget.Toast.makeText(this@MainActivity, R.string.download_operation_failed, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    override fun onStop() {
+        downloadRecovery?.cancel()
+        super.onStop()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

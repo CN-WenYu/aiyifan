@@ -32,6 +32,13 @@ object AppGraph {
         applicationContext = context.applicationContext
     }
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    val downloadRepository: com.aiyifan.app.core.download.OfflineDownloadRepository by lazy {
+        com.aiyifan.app.core.download.OfflineDownloadRepository(applicationContext, catalogRepository) { id ->
+            videoPlaybackControllerProvider.stopOfflineDownload(id)
+        }
+    }
+
     private val videoPlaybackControllerProvider by lazy {
         VideoPlaybackControllerProvider {
             check(::applicationContext.isInitialized) {
@@ -40,6 +47,7 @@ object AppGraph {
             VideoPlaybackController.create(
                 applicationContext = applicationContext,
                 repository = catalogRepository,
+                downloads = downloadRepository,
             )
         }
     }

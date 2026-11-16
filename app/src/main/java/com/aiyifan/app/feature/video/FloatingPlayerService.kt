@@ -40,6 +40,7 @@ class FloatingPlayerService : Service() {
     private var layoutParams: WindowManager.LayoutParams? = null
     private var hiddenEdge: FloatingWindowEdge? = null
     private var isClosing = false
+    private var offlineErrorShown = false
     private var sleepTimerDialog: androidx.appcompat.app.AlertDialog? = null
     private var removePositionListener: (() -> Unit)? = null
     private var removeStateListener: (() -> Unit)? = null
@@ -88,6 +89,14 @@ class FloatingPlayerService : Service() {
                 serviceScope.launch { controller.advanceAutomatically(positionMs) }
             }
             removeStateListener = controller.addStateListener {
+                if (controller.isReleased) {
+                    closeFloatingPlayer(stopService = true, releasePlayback = false)
+                    return@addStateListener
+                }
+                if (controller.hasOfflinePlaybackError && !offlineErrorShown) {
+                    offlineErrorShown = true
+                    Toast.makeText(this, R.string.offline_playback_unavailable, Toast.LENGTH_LONG).show()
+                } else if (!controller.hasOfflinePlaybackError) offlineErrorShown = false
                 root.findViewById<android.widget.TextView>(R.id.floatingSleepTimerButton).text =
                     SleepTimerDialog.label(this, controller.sleepTimerState)
                 updatePlaybackButtons(root)
@@ -100,7 +109,7 @@ class FloatingPlayerService : Service() {
                         when (controller.advanceToNextEpisodeIfEnded()) {
                             EpisodeSwitchResult.Failed -> Toast.makeText(
                                 this@FloatingPlayerService,
-                                R.string.video_stream_load_failed,
+                                if (controller.isOffline) R.string.offline_playback_unavailable else R.string.video_stream_load_failed,
                                 Toast.LENGTH_SHORT,
                             ).show()
                             else -> Unit
@@ -305,7 +314,8 @@ class FloatingPlayerService : Service() {
         controller.detach()
         closeFloatingPlayer(stopService = true, releasePlayback = false)
         startActivity(
-            VideoPlayerActivity.intent(this, session.detail.mediaKey).addFlags(
+            (session.offlineDownloadId?.let { VideoPlayerActivity.offlineIntent(this, it, session.detail.mediaKey) }
+                ?: VideoPlayerActivity.intent(this, session.detail.mediaKey)).addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
             ),
         )

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="offline_playback_unavailable">离线视频不可用或缓存不完整，请返回下载页重新下载。</string>
+    <string name="offline_playback_removed">此离线视频已删除，播放已停止。</string>
+    <string name="offline_playback_label">离线播放</string>
+</resources>

@@ -290,9 +290,31 @@ class RemoteCatalogRepository(
                 throw IllegalStateException("getPlayData failed: ${response.code}")
             }
             parsePlayableEpisode(response.body, episode, episode.resolution)
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
             if (forceRefresh) episode.copy(mediaUrl = null) else episode
         }
+    }
+
+    override suspend fun resolveDownload(detail: VideoDetail, episode: Episode): Episode {
+        val baseUrl = configResolver.resolveBaseUrl()
+        val response = fetcher.get(
+            buildUrl(
+                baseUrl,
+                "api/Video/getPlayData",
+                linkedMapOf(
+                    "mediaKey" to detail.mediaKey,
+                    "videoId" to episode.uniqueId.toString(),
+                    "resolution" to episode.resolution.orEmpty(),
+                    "liveLine" to "",
+                    "subtitlePrefer" to "",
+                    "videoType" to detail.videoType.toString(),
+                ),
+            ),
+        )
+        if (response.code !in 200..299) throw IllegalStateException("getPlayData failed: ${response.code}")
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        return parsePlayableEpisodeStrict(response.body, episode, episode.resolution)
     }
 
     override fun getComments(mediaKey: String): List<Comment> = fallback.getComments(mediaKey)
@@ -480,6 +502,35 @@ class RemoteCatalogRepository(
             ?: return fallbackEpisode
         return fallbackEpisode.copy(
             mediaUrl = chosen.optionalRemoteText("mediaUrl"),
+            resolution = chosen.optionalRemoteText("resolution"),
+            lang = chosen.optionalRemoteText("lang") ?: fallbackEpisode.lang,
+            opSecond = chosen.optionalRemoteSecond("opSecond") ?: fallbackEpisode.opSecond,
+            epSecond = chosen.optionalRemoteSecond("epSecond") ?: fallbackEpisode.epSecond,
+        )
+    }
+
+    private fun parsePlayableEpisodeStrict(payload: String, fallbackEpisode: Episode, requestedResolution: String?): Episode {
+        val root = JSONObject(payload)
+        check(!root.has("ret") || root.optInt("ret") == 200) { "Playback service rejected request" }
+        val items = root.optJSONObject("data")?.optJSONArray("list")
+            ?: throw IllegalStateException("Missing playback list")
+        val playable = buildList {
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                val url = item.optionalRemoteText("mediaUrl")?.trim().orEmpty()
+                val resolution = item.optionalRemoteText("resolution")?.trim()
+                val uri = runCatching { java.net.URI(url) }.getOrNull()
+                if (resolution != null && url.isNotBlank() && uri?.scheme in setOf("http", "https") && !uri?.host.isNullOrBlank()) {
+                    add(item)
+                }
+            }
+        }
+        val chosen = playable.firstOrNull { it.optionalRemoteText("resolution") == requestedResolution }
+            ?: playable.firstOrNull { it.optBoolean("isDefault") }
+            ?: playable.firstOrNull()
+            ?: throw IllegalStateException("No playable download source")
+        return fallbackEpisode.copy(
+            mediaUrl = chosen.getString("mediaUrl").trim(),
             resolution = chosen.optionalRemoteText("resolution"),
             lang = chosen.optionalRemoteText("lang") ?: fallbackEpisode.lang,
             opSecond = chosen.optionalRemoteSecond("opSecond") ?: fallbackEpisode.opSecond,

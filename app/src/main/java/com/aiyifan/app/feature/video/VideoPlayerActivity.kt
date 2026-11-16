@@ -35,6 +35,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
+import com.aiyifan.app.feature.download.DownloadSelectionDialog
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.ui.CommentAdapter
@@ -52,6 +53,9 @@ import kotlin.math.abs
 class VideoPlayerActivity : AppCompatActivity() {
     private lateinit var binding: ActivityVideoPlayerBinding
     private lateinit var playbackController: VideoPlaybackController
+    private var playbackSelectionToken = -1L
+    private var offlineErrorShown = false
+    private val offlineDownloadId: String? get() = intent.getStringExtra(EXTRA_DOWNLOAD_ID)
     private var detail: VideoDetail? = null
     private var selectedEpisode: Episode? = null
     private var playingEpisode: Episode? = null
@@ -101,6 +105,9 @@ class VideoPlayerActivity : AppCompatActivity() {
         binding.playerView.findViewById<ImageButton>(R.id.playerNextEpisodeButton).setOnClickListener { switchEpisode(1) }
         binding.playerView.findViewById<View>(R.id.playerSleepTimerButton).setOnClickListener { showSleepTimer() }
         binding.inAppMiniSleepTimerButton.setOnClickListener { showSleepTimer() }
+        binding.downloadButton.setOnClickListener {
+            detail?.takeUnless { playbackController.isOffline }?.let { DownloadSelectionDialog.show(this, it) }
+        }
         binding.floatingWindowButton.setOnClickListener { showFloatingPresentation() }
         binding.autoSkipIntroOutroSwitch.apply {
             isChecked = autoSkipPreferenceStore.isEnabled()
@@ -137,12 +144,22 @@ class VideoPlayerActivity : AppCompatActivity() {
             stopService(FloatingPlayerService.intent(this))
         }
         val mediaKey = intent.getStringExtra(EXTRA_MEDIA_KEY).orEmpty()
-        val needsLoad = playbackController.requestedMediaKey != mediaKey || playbackController.activeSession == null && !playbackController.isLoading
-        playbackController.openVideo(mediaKey)
+        val needsLoad = playbackController.requestedMediaKey != mediaKey ||
+            playbackController.requestedOfflineDownloadId != offlineDownloadId ||
+            playbackController.activeSession == null && !playbackController.isLoading
+        playbackController.openVideo(mediaKey, offlineDownloadId)
+        playbackSelectionToken = playbackController.selectionToken
         overlayHandoffPending = false
         window.attributes = window.attributes.apply { screenBrightness = playerBrightness }
         registerPositionListener()
         removeStateListener = playbackController.addStateListener {
+            if (playbackSelectionToken != playbackController.selectionToken) return@addStateListener
+            if (playbackController.wasOfflineDownloadRemoved && offlineDownloadId != null) {
+                Toast.makeText(this, R.string.offline_playback_removed, Toast.LENGTH_SHORT).show()
+                finish()
+                return@addStateListener
+            }
+            showOfflinePlaybackError()
             val timerLabel = SleepTimerDialog.label(this, playbackController.sleepTimerState)
             binding.playerView.findViewById<android.widget.TextView>(R.id.playerSleepTimerButton).text = timerLabel
             binding.inAppMiniSleepTimerButton.text = timerLabel
@@ -156,7 +173,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
         }
         syncFromActivePlaybackSession()
-        if (needsLoad) loadDetail(mediaKey)
+        if (needsLoad) loadRequestedDetail(mediaKey)
         val recovery = FloatingPlayerRecovery.consumePosition(this)
         if (playbackController.activeSession?.detail?.mediaKey == intent.getStringExtra(EXTRA_MEDIA_KEY)) {
             if (recovery != null || playbackController.hasOverlayOwner) {
@@ -168,6 +185,69 @@ class VideoPlayerActivity : AppCompatActivity() {
         if (restoreMiniPlayerOnStart && !isInPictureInPictureMode) {
             restoreMiniPlayerOnStart = false
             showInAppMiniPlayer()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        detailJob?.cancel()
+        playbackJob?.cancel()
+        detail = null
+        playingEpisode = null
+        selectedEpisode = null
+        offlineErrorShown = false
+        playbackController.openVideo(intent.getStringExtra(EXTRA_MEDIA_KEY).orEmpty(), offlineDownloadId)
+        playbackSelectionToken = playbackController.selectionToken
+        loadRequestedDetail(intent.getStringExtra(EXTRA_MEDIA_KEY).orEmpty())
+    }
+
+    private fun ownsPlaybackSelection(): Boolean =
+        playbackSelectionToken == playbackController.selectionToken &&
+        playbackController.requestedMediaKey == intent.getStringExtra(EXTRA_MEDIA_KEY) &&
+            playbackController.requestedOfflineDownloadId == offlineDownloadId
+
+    private fun loadRequestedDetail(mediaKey: String) {
+        val downloadId = offlineDownloadId
+        binding.downloadButton.isVisible = downloadId == null
+        if (downloadId == null) {
+            loadDetail(mediaKey)
+        } else {
+            if (playbackController.activeSession?.offlineDownloadId == downloadId) {
+                syncFromActivePlaybackSession()
+                attachPlayerToCurrentSurface()
+                return
+            }
+            detailJob?.cancel()
+            val token = playbackSelectionToken
+            binding.title.setText(R.string.video_loading)
+            detailJob = lifecycleScope.launch {
+                try {
+                    AppGraph.downloadRepository.awaitLoaded()
+                    if (token != playbackController.selectionToken || offlineDownloadId != downloadId) return@launch
+                    val history = AppGraph.catalogRepository.getHistory().firstOrNull { it.mediaKey == mediaKey }
+                    val cachedEpisode = AppGraph.downloadRepository.get(downloadId)?.metadata?.episode
+                    val position = history?.takeIf { it.episodeKey == cachedEpisode?.episodeKey }?.progressMs ?: 0L
+                    val result = playbackController.loadOfflineDownload(downloadId, position)
+                    handleEpisodeResult(result)
+                    if (result is EpisodeSwitchResult.Failed) finish()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    if (token != playbackController.selectionToken) return@launch
+                    Toast.makeText(this@VideoPlayerActivity, R.string.offline_playback_unavailable, Toast.LENGTH_LONG).show()
+                    finish()
+                }
+            }
+        }
+    }
+
+    private fun showOfflinePlaybackError() {
+        if (!playbackController.hasOfflinePlaybackError) {
+            offlineErrorShown = false
+        } else if (!offlineErrorShown) {
+            offlineErrorShown = true
+            Toast.makeText(this, R.string.offline_playback_unavailable, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -202,7 +282,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         detailJob = lifecycleScope.launch {
             runCatching { AppGraph.catalogRepository.getVideoDetail(mediaKey) }
                 .onSuccess { loadedDetail ->
-                    if (playbackController.requestedMediaKey != mediaKey) return@onSuccess
+                    if (playbackController.requestedMediaKey != mediaKey || playbackController.isOffline) return@onSuccess
                     detail = loadedDetail
                     renderDetail(loadedDetail)
                     AppGraph.catalogRepository.markFavoriteEpisodesKnown(loadedDetail)
@@ -214,7 +294,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                 }
                 .onFailure { error ->
                     if (error is CancellationException) throw error
-                    if (playbackController.requestedMediaKey != mediaKey) return@onFailure
+                    if (playbackController.requestedMediaKey != mediaKey || playbackController.isOffline) return@onFailure
                     Toast.makeText(this@VideoPlayerActivity, R.string.video_detail_load_failed, Toast.LENGTH_SHORT).show()
                     finish()
                 }
@@ -261,11 +341,17 @@ class VideoPlayerActivity : AppCompatActivity() {
             startActivity(intent(this, video.mediaKey))
         }
         binding.relatedRecycler.adapter = relatedAdapter
-        relatedAdapter.submitList(detail.related)
+        relatedAdapter.submitList(if (playbackController.isOffline) emptyList() else detail.related)
+        binding.relatedRecycler.isVisible = !playbackController.isOffline
+        binding.relatedTitle.isVisible = !playbackController.isOffline
 
         val commentAdapter = CommentAdapter()
         binding.commentRecycler.adapter = commentAdapter
-        commentAdapter.submitList(AppGraph.catalogRepository.getComments(detail.mediaKey))
+        binding.commentRecycler.isVisible = !playbackController.isOffline
+        binding.commentTitle.isVisible = !playbackController.isOffline
+        commentAdapter.submitList(if (playbackController.isOffline) emptyList() else AppGraph.catalogRepository.getComments(detail.mediaKey))
+        binding.downloadButton.isVisible = !playbackController.isOffline
+        binding.favoriteButton.isVisible = !playbackController.isOffline
     }
 
     private fun loadEpisodePlayback(
@@ -301,7 +387,10 @@ class VideoPlayerActivity : AppCompatActivity() {
                 syncFromActivePlaybackSession()
                 if (!playbackController.hasOverlayOwner) attachPlayerToCurrentSurface()
             }
-            EpisodeSwitchResult.Failed -> Toast.makeText(this, R.string.video_stream_load_failed, Toast.LENGTH_SHORT).show()
+            EpisodeSwitchResult.Failed -> {
+                if (playbackController.isOffline) showOfflinePlaybackError()
+                else Toast.makeText(this, R.string.video_stream_load_failed, Toast.LENGTH_SHORT).show()
+            }
             EpisodeSwitchResult.Unavailable -> Unit
         }
         updateEpisodeButtons()
@@ -530,12 +619,14 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun syncFromActivePlaybackSession() {
+        if (playbackSelectionToken != playbackController.selectionToken) return
         val session = playbackController.activeSession?.takeIf {
             it.detail.mediaKey == intent.getStringExtra(EXTRA_MEDIA_KEY)
         }
         if (session != null) {
             val sessionDetail = session.detail
-            if (detail?.mediaKey != sessionDetail.mediaKey) {
+            if (session.offlineDownloadId != null) intent.putExtra(EXTRA_DOWNLOAD_ID, session.offlineDownloadId)
+            if (detail != sessionDetail) {
                 detail = sessionDetail
                 renderDetail(sessionDetail)
             }
@@ -594,7 +685,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             isInAppMiniPlayerVisible = false
             binding.inAppMiniPlayer.isVisible = false
         }
-        if (playbackController.requestedMediaKey == intent.getStringExtra(EXTRA_MEDIA_KEY) &&
+        if (ownsPlaybackSelection() &&
             (!ScreenOffPlaybackObserver.canPlay(this) ||
             (!overlayHandoffPending && !playbackController.hasOverlayOwner && !isChangingConfigurations)
             )
@@ -611,7 +702,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         binding.playerView.player = null
         binding.inAppMiniPlayerView.player = null
         if (isFinishing && !playbackController.hasOverlayOwner &&
-            playbackController.requestedMediaKey == intent.getStringExtra(EXTRA_MEDIA_KEY)
+            ownsPlaybackSelection()
         ) {
             playbackController.saveHistory()
             playbackController.release()
@@ -768,11 +859,15 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     companion object {
         private const val EXTRA_MEDIA_KEY = "mediaKey"
+        private const val EXTRA_DOWNLOAD_ID = "offlineDownloadId"
         private const val NORMAL_PLAYER_HEIGHT_DP = 211
         private const val IN_APP_MINI_MIN_WIDTH_DP = 180
         private const val IN_APP_MINI_MARGIN_DP = 16
         private const val DEFAULT_SYSTEM_BRIGHTNESS = 128
         private const val GESTURE_FEEDBACK_HIDE_DELAY_MS = 1_500L
+        fun offlineIntent(context: Context, taskId: String, mediaKey: String): Intent =
+            intent(context, mediaKey).putExtra(EXTRA_DOWNLOAD_ID, taskId)
+
         fun intent(context: Context, mediaKey: String): Intent =
             Intent(context, VideoPlayerActivity::class.java).putExtra(EXTRA_MEDIA_KEY, mediaKey)
     }
