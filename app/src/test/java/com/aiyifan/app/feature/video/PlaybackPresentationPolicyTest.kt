@@ -23,9 +23,9 @@ class PlaybackPresentationPolicyTest {
     }
 
     @Test
-    fun `overlay is fallback when picture in picture is unavailable`() {
+    fun `leaving never opens an overlay even with permission when picture in picture is unavailable`() {
         assertEquals(
-            PlaybackDestination.OVERLAY,
+            PlaybackDestination.IN_APP_MINI_PLAYER,
             PlaybackPresentationPolicy.destinationWhenLeaving(
                 PlaybackCapabilities(
                     hasPlayableMedia = true,
@@ -40,9 +40,9 @@ class PlaybackPresentationPolicyTest {
     }
 
     @Test
-    fun `overlay is fallback when picture in picture is disabled`() {
+    fun `leaving never opens an overlay when picture in picture is disabled`() {
         assertEquals(
-            PlaybackDestination.OVERLAY,
+            PlaybackDestination.IN_APP_MINI_PLAYER,
             PlaybackPresentationPolicy.destinationWhenLeaving(
                 PlaybackCapabilities(
                     hasPlayableMedia = true,

@@ -39,6 +39,77 @@ class OfflineDownloadDeviceTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
+    @Test(timeout = 120_000)
+    fun offlineOverlayContinuesAfterServerStopsAndReturnsWithSameSession() = runBlocking {
+        val automation = instrumentation.uiAutomation
+        fun shell(command: String) = automation.executeShellCommand(command).use {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(it).use { stream -> stream.readBytes().toString(Charsets.UTF_8) }
+        }
+        val previousMode = shell("appops get ${context.packageName} SYSTEM_ALERT_WINDOW")
+        val restoreMode = Regex("SYSTEM_ALERT_WINDOW: (allow|ignore|deny|default|foreground)")
+            .find(previousMode)?.groupValues?.get(1) ?: "default"
+        val server = FixtureServer(instrumentation.context)
+        val repository = withContext(Dispatchers.Main) {
+            OfflineDownloadRepository(context, object : CatalogRepository by FakeCatalogRepository() {
+                override suspend fun resolveDownload(detail: VideoDetail, episode: Episode) = episode
+            })
+        }
+        val previousNetwork = repository.mobileDataAllowed
+        val episode = Episode("overlay-offline-episode", "1", 1, server.url("/playback-test.mp4"))
+        val detail = VideoDetail("overlay-offline-fixture", "离线悬浮验证", "", 1, episodes = listOf(episode))
+        var id: String? = null
+        try {
+            shell("input keyevent KEYCODE_WAKEUP")
+            shell("wm dismiss-keyguard")
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
+            val download = withContext(Dispatchers.Main) {
+                repository.setMobileDataAllowed(true)
+                repository.enqueue(detail, episode)
+            }
+            id = download
+            await { repository.get(download)?.download?.state == Download.STATE_COMPLETED }
+            withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
+            server.close()
+            val requestCount = server.requests.size
+            ActivityScenario.launch<VideoPlayerActivity>(VideoPlayerActivity.offlineIntent(context, download, detail.mediaKey)).use { scenario ->
+                val controller = withContext(Dispatchers.Main) { AppGraph.videoPlaybackController }
+                await { withContext(Dispatchers.Main) { controller.isPlaying } }
+                scenario.onActivity {
+                    controller.seekTo(2_000L)
+                    it.findViewById<android.widget.ImageButton>(com.aiyifan.app.R.id.floatingWindowButton).performClick()
+                }
+                await { withContext(Dispatchers.Main) { controller.hasOverlayOwner && controller.isPlaying && controller.currentPositionMs > 2_500L } }
+                withContext(Dispatchers.Main) {
+                    assertEquals(download, controller.activeSession?.offlineDownloadId)
+                    controller.pause()
+                    controller.seekTo(5_000L)
+                    context.startActivity(VideoPlayerActivity.offlineIntent(context, download, detail.mediaKey)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                }
+                await { withContext(Dispatchers.Main) { !controller.hasOverlayOwner } }
+                scenario.onActivity {
+                    assertEquals(download, controller.activeSession?.offlineDownloadId)
+                    assertEquals(episode.episodeKey, controller.activeSession?.episode?.episodeKey)
+                    assertEquals(5_000L, controller.currentPositionMs)
+                    assertFalse(controller.playWhenReady)
+                    assertFalse(controller.hasOfflinePlaybackError)
+                    assertNotNull(it.findViewById<androidx.media3.ui.PlayerView>(com.aiyifan.app.R.id.playerView).player)
+                }
+            }
+            assertEquals(requestCount, server.requests.size)
+        } finally {
+            context.stopService(com.aiyifan.app.feature.video.FloatingPlayerService.intent(context))
+            withContext(Dispatchers.Main) {
+                AppGraph.videoPlaybackController.release()
+                id?.let { repository.remove(it) }
+                repository.setMobileDataAllowed(previousNetwork)
+                AppGraph.catalogRepository.removeHistory(setOf(detail.mediaKey))
+            }
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW $restoreMode")
+            server.close()
+        }
+    }
+
     /** Run seed, force-stop the app, then run play with -e offlineColdPhase seed/play. */
     @Test(timeout = 120_000)
     fun persistedDownloadPlaysInFreshProcess() = runBlocking {
