@@ -15,7 +15,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
-import com.aiyifan.app.feature.localmedia.LocalMediaActivity
 import com.aiyifan.app.feature.main.MainActivity
 import com.aiyifan.app.feature.video.VideoPlayerActivity
 import com.google.android.material.tabs.TabLayout
@@ -27,43 +26,27 @@ import java.io.File
 /** Explicit live-service checks; run separately from deterministic unit tests. */
 @RunWith(AndroidJUnit4::class)
 class ShortDramaDeviceTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
-    @Test fun navigationAndLocalMediaReturn() {
+    @Test fun navigationKeepsOnlineTabsWithoutLocalMediaEntry() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val tabs = activity.findViewById<TabLayout>(R.id.bottomTabs)
                 assertEquals(listOf("首页", "短剧", "我的"), (0..2).map { tabs.getTabAt(it)?.text.toString() })
                 tabs.getTabAt(2)!!.select()
                 activity.supportFragmentManager.executePendingTransactions()
+                val rows = activity.findViewById<android.view.ViewGroup>(R.id.contentGroup)
+                assertFalse((0 until rows.childCount).any {
+                    rows.getChildAt(it).contentDescription == activity.getString(R.string.local_media_title)
+                })
             }
-            await {
-                var ordered = false
-                scenario.onActivity { activity ->
-                    ordered = activity.findViewById<View>(R.id.localMediaButton).top > activity.findViewById<View>(R.id.hotButton).top
-                }
-                ordered
-            }
-            screenshot("mine-local-entry")
-            val monitor = instrumentation.addMonitor(LocalMediaActivity::class.java.name, null, false)
-            try {
-                scenario.onActivity { it.findViewById<View>(R.id.localMediaButton).performClick() }
-                val local = instrumentation.waitForMonitorWithTimeout(monitor, 5_000)
-                assertNotNull("Local media entry opens its activity", local)
-                instrumentation.waitForIdleSync()
-                screenshot("local-media")
-                instrumentation.runOnMainSync {
-                    local.findViewById<View>(R.id.localBackButton).performClick()
-                }
-                instrumentation.waitForIdleSync()
-                scenario.recreate()
-                scenario.onActivity {
-                    assertEquals(2, it.findViewById<TabLayout>(R.id.bottomTabs).selectedTabPosition)
-                    assertNotNull(it.findViewById<View>(R.id.localMediaButton))
-                }
-            } finally {
-                instrumentation.removeMonitor(monitor)
+            screenshot("mine-without-local-entry")
+            scenario.recreate()
+            scenario.onActivity {
+                assertEquals(2, it.findViewById<TabLayout>(R.id.bottomTabs).selectedTabPosition)
             }
         }
     }

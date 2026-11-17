@@ -3,6 +3,7 @@ package com.aiyifan.app.core.data.remote
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteCatalogRepositorySearchTest {
@@ -54,7 +55,7 @@ class RemoteCatalogRepositorySearchTest {
     }
 
     @Test
-    fun `search falls back to home catalog when remote search returns business error`() = runBlocking {
+    fun `search uses real cached home catalog when remote search returns business error`() = runBlocking {
         val repository = repository(
             searchResponse = """{"ret":202,"data":null}""",
             homeResponse = """
@@ -81,6 +82,7 @@ class RemoteCatalogRepositorySearchTest {
             """.trimIndent(),
         )
 
+        repository.getHotVideos()
         val results = repository.searchVideos("电影")
 
         assertEquals(listOf("catalog-movie"), results.map { it.mediaKey })
@@ -160,12 +162,10 @@ class RemoteCatalogRepositorySearchTest {
     }
 
     @Test
-    fun `search falls back to mock catalog when home catalog is unavailable`() = runBlocking {
+    fun `search reports failure when no real cached matches exist`() = runBlocking {
         val repository = repository(searchResponse = """{"ret":202,"data":null}""")
 
-        val results = repository.searchVideos("迷城")
-
-        assertEquals(listOf("movie-mc"), results.map { it.mediaKey })
+        assertTrue(runCatching { repository.searchVideos("迷城") }.isFailure)
     }
 
     private fun repository(

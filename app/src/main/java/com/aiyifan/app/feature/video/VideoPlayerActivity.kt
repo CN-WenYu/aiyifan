@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.video
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
@@ -94,6 +98,11 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     @UnstableApi
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivityVideoPlayerBinding.inflate(layoutInflater)
@@ -175,6 +184,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!::binding.isInitialized) return
         if (playbackController.isReleased) playbackController = AppGraph.videoPlaybackController
         if (playbackController.hasOverlayOwner) {
             playbackController.hasOverlayOwner = false
@@ -802,6 +812,10 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         cancelPendingOverlayStart()
+        if (!::binding.isInitialized) {
+            super.onStop()
+            return
+        }
         resetFullscreenLock()
         sleepTimerDialog?.dismiss()
         sleepTimerDialog = null
@@ -825,6 +839,10 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         cancelPendingOverlayStart()
+        if (!::binding.isInitialized) {
+            super.onDestroy()
+            return
+        }
         playbackJob?.cancel()
         detailJob?.cancel()
         resetFullscreenLock()

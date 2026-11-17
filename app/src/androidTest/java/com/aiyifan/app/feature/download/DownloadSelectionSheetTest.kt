@@ -20,6 +20,8 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class DownloadSelectionSheetTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     @Test
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun addingOnMobileShowsWifiMessageAndKeepsTasksAfterSheetCloses() = kotlinx.coroutines.runBlocking {

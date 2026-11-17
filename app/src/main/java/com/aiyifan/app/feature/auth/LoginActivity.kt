@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.auth
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -12,6 +16,11 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var binding: ActivityLoginBinding
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivityLoginBinding.inflate(layoutInflater)

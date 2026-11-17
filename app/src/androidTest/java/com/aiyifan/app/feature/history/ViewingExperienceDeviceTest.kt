@@ -25,6 +25,8 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class ViewingExperienceDeviceTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val repository get() = AppGraph.catalogRepository

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols Rounded wifi_off, Google, Apache License 2.0.
+     Source: https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsrounded/wifi_off/default/24px.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp" android:height="64dp" android:viewportWidth="960" android:viewportHeight="960">
+    <group android:translateY="960">
+        <path android:fillColor="@color/text_secondary"
+            android:pathData="M762,-84L414,-434Q383,-427 354.5,-415T301,-386Q280,-372 254.5,-371.5T212,-389Q194,-407 195.5,-432.5T217,-473Q240,-490 265.5,-504T318,-530L228,-620Q202,-606 177.5,-590.5T130,-557Q110,-541 84.5,-541T42,-559Q24,-577 25,-602T46,-643Q68,-661 91,-677.5T140,-708L84,-764Q73,-775 73,-792T84,-820Q95,-831 112,-831T140,-820L819,-141Q831,-129 831,-112.5T819,-84Q807,-73 790.5,-72.5T762,-84ZM409,-149.5Q380,-179 380,-220Q380,-262 409,-291T480,-320Q522,-320 551,-291T580,-220Q580,-179 551,-149.5T480,-120Q438,-120 409,-149.5ZM753,-395Q737,-379 715.5,-379.5T678,-396L668,-406L658,-416L562,-512Q549,-525 557,-539T585,-548Q630,-537 670.5,-517T746,-470Q764,-456 766.5,-433.5T753,-395ZM918,-559Q901,-541 876,-540.5T831,-556Q759,-615 669.5,-647.5T480,-680Q459,-680 439.5,-678.5T400,-674Q375,-670 355,-684.5T331,-724Q327,-749 342,-769T382,-793Q406,-797 430.5,-798.5T480,-800Q605,-800 715.5,-758.5T914,-644Q934,-627 935,-602T918,-559Z" />
+    </group>
+</vector>

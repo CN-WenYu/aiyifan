@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.history
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -28,6 +32,11 @@ class HistoryActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivitySimpleListBinding.inflate(layoutInflater)
@@ -68,6 +77,7 @@ class HistoryActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!::binding.isInitialized) return
         removeListener = repository.addHistoryListener { runOnUiThread { if (!isDestroyed) render() } }
         render()
     }

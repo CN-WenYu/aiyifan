@@ -17,7 +17,6 @@ import com.aiyifan.app.databinding.FragmentMineBinding
 import com.aiyifan.app.feature.collection.CollectionActivity
 import com.aiyifan.app.feature.history.HistoryActivity
 import com.aiyifan.app.feature.hot.HotActivity
-import com.aiyifan.app.feature.localmedia.LocalMediaActivity
 import com.bumptech.glide.Glide
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
@@ -102,7 +101,6 @@ class MineFragment : Fragment() {
         binding.historyButton.setOnClickListener { startActivity(Intent(requireContext(), HistoryActivity::class.java)) }
         binding.collectionButton.setOnClickListener { startActivity(Intent(requireContext(), CollectionActivity::class.java)) }
         binding.hotButton.setOnClickListener { startActivity(Intent(requireContext(), HotActivity::class.java)) }
-        binding.localMediaButton.setOnClickListener { startActivity(Intent(requireContext(), LocalMediaActivity::class.java)) }
         binding.downloadsButton.setOnClickListener { startActivity(Intent(requireContext(), com.aiyifan.app.feature.download.DownloadsActivity::class.java)) }
         binding.themeSettingsButton.setOnClickListener {
             val modes = ThemeMode.entries

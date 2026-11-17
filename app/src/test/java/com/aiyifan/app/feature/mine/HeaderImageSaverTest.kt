@@ -33,6 +33,8 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class HeaderImageSaverTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     private val context get() = RuntimeEnvironment.getApplication()
     private lateinit var provider: GalleryProvider
 

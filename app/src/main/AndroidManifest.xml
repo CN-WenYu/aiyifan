@@ -77,6 +77,10 @@
             android:foregroundServiceType="mediaPlayback" />
         <activity
             android:name=".feature.main.MainActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".feature.startup.StartupActivity"
             android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>

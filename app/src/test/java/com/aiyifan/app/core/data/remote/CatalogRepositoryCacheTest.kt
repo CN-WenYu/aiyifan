@@ -38,12 +38,12 @@ class CatalogRepositoryCacheTest {
         assertEquals(7, fetcher.requests)
     }
 
-    @Test fun `home fallback and failed refresh never poison success cache`() = runBlocking {
+    @Test fun `initial failure and failed refresh never poison success cache`() = runBlocking {
         val fetcher = Fetcher()
         val repo = RemoteCatalogRepository(configResolver = RemoteConfigResolver(fetcher), fetcher = fetcher)
         val category = Category("3", "Category", 1, 0)
         fetcher.status = 500
-        repo.getHomeVideoPage(category, 1)
+        assertTrue(runCatching { repo.getHomeVideoPage(category, 1) }.isFailure)
         fetcher.status = 200
         val good = repo.getHomeVideoPage(category, 1)
         assertEquals(2, fetcher.requests)

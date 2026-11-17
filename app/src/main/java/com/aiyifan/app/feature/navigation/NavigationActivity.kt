@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.navigation
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
@@ -25,6 +29,11 @@ class NavigationActivity : AppCompatActivity() {
     private val repository = AppGraph.channelNavigationRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         selectedId = savedInstanceState?.getString("selectedChannel")

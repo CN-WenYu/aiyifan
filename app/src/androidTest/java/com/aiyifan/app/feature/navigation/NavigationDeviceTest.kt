@@ -11,6 +11,8 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class NavigationDeviceTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     @Test fun remoteChannelsSwitchTagsAndRestoreSelection() {
         ActivityScenario.launch(NavigationActivity::class.java).use { scenario ->
             var loaded = false

@@ -1,6 +1,5 @@
 package com.aiyifan.app.core.data.remote
 
-import com.aiyifan.app.core.data.FakeCatalogRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -10,7 +9,6 @@ class RemoteCatalogRepositoryDetailTest {
     @Test
     fun `detail response retains episode intro and outro seconds`() = runBlocking {
         val repository = RemoteCatalogRepository(
-            fallback = FakeCatalogRepository(),
             configResolver = RemoteConfigResolver(DetailFetcher()),
             fetcher = DetailFetcher(),
         )

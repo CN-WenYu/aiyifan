@@ -16,6 +16,8 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class HeaderSlideshowDeviceTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     private fun state(activity: MainActivity): HeaderSlideshow {
         val fragment = activity.supportFragmentManager.findFragmentByTag(MineFragment::class.java.name)!!
         return MineFragment::class.java.getDeclaredField("slideshow").apply { isAccessible = true }

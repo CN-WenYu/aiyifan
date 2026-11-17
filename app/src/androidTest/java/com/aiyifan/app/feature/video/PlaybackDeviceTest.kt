@@ -29,6 +29,8 @@ import java.io.File
 /** Uses a small deterministic clip, without depending on the catalog or streaming network. */
 @RunWith(AndroidJUnit4::class)
 class PlaybackDeviceTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private var historyBefore: String? = null
@@ -72,6 +74,7 @@ class PlaybackDeviceTest {
             }
             context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
             val video = LocalVideo(uri.lastPathSegment!!.toLong(), uri.toString(), "全屏锁定验证", 20_000L, 0L, 0L, null)
+            com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.LOCAL
             ActivityScenario.launch<LocalVideoPlayerActivity>(LocalVideoPlayerActivity.intent(context, video)).use { scenario ->
                 lateinit var activity: LocalVideoPlayerActivity
                 scenario.onActivity { activity = it }
@@ -333,6 +336,7 @@ class PlaybackDeviceTest {
             }
             context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
             val video = LocalVideo(uri.lastPathSegment!!.toLong(), uri.toString(), "播放器验证", 20_000L, 0L, 0L, null)
+            com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.LOCAL
             scenario = ActivityScenario.launch(LocalVideoPlayerActivity.intent(context, video))
             lateinit var player: androidx.media3.common.Player
             scenario.onActivity { player = it.findViewById<PlayerView>(R.id.localPlayerView).player!! }

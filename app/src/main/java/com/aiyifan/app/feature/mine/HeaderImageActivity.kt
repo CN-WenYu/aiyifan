@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.mine
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -41,6 +45,11 @@ class HeaderImageActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         maskEnabled = savedInstanceState?.getBoolean("mask_enabled", true) ?: true
         val name = intent.getStringExtra(EXTRA_IMAGE)

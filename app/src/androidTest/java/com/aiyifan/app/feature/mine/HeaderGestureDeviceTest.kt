@@ -17,6 +17,8 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class HeaderGestureDeviceTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     @Test fun headerHandsVerticalScrollToPageAndDoesNotCaptureButtonTouches() {
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
         instrumentation.runOnMainSync {

@@ -145,6 +145,7 @@ class FullscreenLockInteractionTest {
     }
 
     private fun withPlayer(local: Boolean, test: (Fixture) -> Unit) {
+        com.aiyifan.app.core.startup.StartupSession.mode = if (local) com.aiyifan.app.core.startup.AppMode.LOCAL else com.aiyifan.app.core.startup.AppMode.ONLINE
         androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().setInTouchMode(true)
         val type = if (local) LocalVideoPlayerActivity::class.java else VideoPlayerActivity::class.java
         val intent = Intent().putExtra("contentUri", "content://media/external/video/media/1").putExtra("id", 1L)
@@ -173,6 +174,7 @@ class FullscreenLockInteractionTest {
         } finally {
             activity.finish()
             controller.destroy()
+            com.aiyifan.app.core.startup.StartupSession.mode = null
         }
     }
 

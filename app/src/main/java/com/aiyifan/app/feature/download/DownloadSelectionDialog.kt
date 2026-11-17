@@ -52,7 +52,7 @@ object DownloadSelectionDialog {
         private var waitingForWifi = false
         private var preparation: Job? = null
         private var observation: Job? = null
-        private val adapter = EpisodeGridAdapter(detail.episodes, selected) { key ->
+        private val adapter = EpisodeGridAdapter(detail.episodes) { key ->
             if (!selected.add(key)) selected.remove(key)
             renderSelection()
         }
@@ -163,9 +163,7 @@ object DownloadSelectionDialog {
             binding.selectAllButton.isEnabled = loaded && availableCount > 0
             binding.selectAllButton.setText(if (selected.size == availableCount && availableCount > 0)
                 R.string.download_deselect_all else R.string.download_select_all)
-            adapter.existing = existing
-            adapter.loaded = loaded
-            adapter.notifyDataSetChanged()
+            adapter.submitState(selected, existing, loaded)
         }
 
         private fun prepare() {
@@ -225,37 +223,50 @@ object DownloadSelectionDialog {
         }
     }
 
-    private class EpisodeGridAdapter(
+    internal class EpisodeGridAdapter(
         private val episodes: List<Episode>,
-        private val selected: Set<String>,
         private val toggle: (String) -> Unit,
     ) : RecyclerView.Adapter<EpisodeGridAdapter.Holder>() {
-        var existing: Map<String, Int> = emptyMap()
-        var loaded = false
+        private data class Row(val checked: Boolean, val existingStatus: Int?, val enabled: Boolean)
+        private var rows = episodes.map { Row(false, null, false) }
+
+        fun submitState(selected: Set<String>, existing: Map<String, Int>, loaded: Boolean) {
+            val updated = episodes.map { episode ->
+                Row(episode.episodeKey in selected && episode.episodeKey !in existing,
+                    existing[episode.episodeKey], loaded && episode.episodeKey !in existing)
+            }
+            val previous = rows
+            rows = updated
+            updated.indices.filter { previous[it] != updated[it] }.forEach { notifyItemChanged(it) }
+        }
         class Holder(val binding: ItemDownloadEpisodeBinding) : RecyclerView.ViewHolder(binding.root)
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
             Holder(ItemDownloadEpisodeBinding.inflate(LayoutInflater.from(parent.context), parent, false))
         override fun getItemCount() = episodes.size
         override fun onBindViewHolder(holder: Holder, position: Int) = with(holder.binding) {
             val episode = episodes[position]
-            val checked = episode.episodeKey in selected
-            val status = existing[episode.episodeKey]
+            val row = rows[position]
+            val checked = row.checked
+            val status = row.existingStatus
                 ?: if (checked) R.string.download_episode_selected else R.string.download_episode_available
             val context = root.context
             root.isChecked = checked
-            root.isEnabled = loaded && episode.episodeKey !in existing
+            root.isEnabled = row.enabled
             root.setCardBackgroundColor(ContextCompat.getColor(context, if (checked) R.color.chip_selected else R.color.field_bg))
             root.strokeColor = ContextCompat.getColor(context, if (checked) R.color.accent else R.color.outline)
             root.contentDescription = "${episode.episodeTitle}，${context.getString(status)}"
             episodeTitle.text = episode.episodeTitle
             episodeTitle.setTextColor(ContextCompat.getColor(context, when {
                 checked -> R.color.accent
-                episode.episodeKey in existing -> R.color.text_secondary
+                row.existingStatus != null -> R.color.text_secondary
                 else -> R.color.text_primary
             }))
             episodeState.setText(status)
             episodeState.setTextColor(ContextCompat.getColor(context, if (checked) R.color.accent else R.color.text_secondary))
-            root.setOnClickListener { toggle(episode.episodeKey) }
+            root.setOnClickListener {
+                val current = holder.bindingAdapterPosition
+                if (current != RecyclerView.NO_POSITION && rows[current].enabled) toggle(episodes[current].episodeKey)
+            }
         }
     }
 

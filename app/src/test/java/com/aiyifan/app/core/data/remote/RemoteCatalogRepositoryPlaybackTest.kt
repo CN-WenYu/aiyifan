@@ -1,6 +1,5 @@
 package com.aiyifan.app.core.data.remote
 
-import com.aiyifan.app.core.data.FakeCatalogRepository
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import kotlinx.coroutines.runBlocking
@@ -68,7 +67,6 @@ class RemoteCatalogRepositoryPlaybackTest {
     }
 
     private fun repository(fetcher: HttpFetcher) = RemoteCatalogRepository(
-        fallback = FakeCatalogRepository(),
         configResolver = RemoteConfigResolver(fetcher),
         fetcher = fetcher,
     )

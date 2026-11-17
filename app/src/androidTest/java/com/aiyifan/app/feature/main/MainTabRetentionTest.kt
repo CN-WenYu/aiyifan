@@ -15,6 +15,8 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MainTabRetentionTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     @Test fun switchingTabsKeepsViewsAndAdaptersAndRestoresHiddenState() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             lateinit var home: Fragment

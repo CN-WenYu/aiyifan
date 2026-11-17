@@ -1,6 +1,5 @@
 package com.aiyifan.app.core.data.remote
 
-import com.aiyifan.app.core.data.FakeCatalogRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -39,7 +38,7 @@ class RemoteCatalogRepositoryHomeRefreshTest {
     }
 
     @Test
-    fun `empty refresh response keeps previously cached sections`() = runBlocking {
+    fun `successful empty refresh replaces previously cached sections`() = runBlocking {
         val fetcher = SequencedHomeFetcher(
             homeResponses = listOf(homeResponse("Cached title"), emptyHomeResponse()),
         )
@@ -47,14 +46,13 @@ class RemoteCatalogRepositoryHomeRefreshTest {
 
         assertEquals("Cached title", repository.getHomeVideos("Recommended").single().title)
 
-        assertTrue(runCatching { repository.refreshHome() }.isFailure)
+        repository.refreshHome()
 
-        assertEquals("Cached title", repository.getHomeVideos("Recommended").single().title)
+        assertTrue(repository.getHomeVideos("Recommended").isEmpty())
         assertEquals(2, fetcher.homeRequestCount)
     }
 
     private fun repository(fetcher: HttpFetcher) = RemoteCatalogRepository(
-        fallback = FakeCatalogRepository(),
         configResolver = RemoteConfigResolver(fetcher),
         fetcher = fetcher,
     )

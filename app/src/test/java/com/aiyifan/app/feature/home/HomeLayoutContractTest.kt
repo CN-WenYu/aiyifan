@@ -97,7 +97,7 @@ class HomeLayoutContractTest {
 
         assertTrue(home.contains("GridLayoutManager(requireContext(), 2)"))
         assertTrue(home.contains("HomeVideoAdapter"))
-        assertTrue(home.contains("ConcatAdapter(bannerAdapter, continueAdapter, adapter)"))
+        assertTrue(home.contains("ConcatAdapter(bannerAdapter, continueAdapter, statusAdapter, adapter)"))
         assertTrue(home.contains("HomeFeedSections.from"))
         assertFalse(home.contains("LinearLayoutManager(requireContext())"))
         assertTrue(source("feature/hot/HotFragment.kt").readText().contains("LinearLayoutManager(requireContext())"))

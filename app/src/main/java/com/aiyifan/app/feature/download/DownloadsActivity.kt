@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.download
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.os.Bundle
 import android.text.format.Formatter
 import android.view.View
@@ -39,6 +43,11 @@ class DownloadsActivity : AppCompatActivity() {
     private var librarySheet: DownloadLibrarySheet? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivityDownloadsBinding.inflate(layoutInflater)

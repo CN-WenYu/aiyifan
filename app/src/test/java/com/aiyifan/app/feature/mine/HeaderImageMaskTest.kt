@@ -20,6 +20,8 @@ import java.time.Duration
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [28, 35])
 class HeaderImageMaskTest {
+    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
+    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     @Test fun `single taps toggle mask double tap does not and recreation restores state`() {
         val controller = Robolectric.buildActivity(HeaderImageActivity::class.java,
             Intent().putExtra(HeaderImageActivity.EXTRA_IMAGE, "mine_header_001.webp"))

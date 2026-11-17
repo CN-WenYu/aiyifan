@@ -14,6 +14,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.aiyifan.app.R
+import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.databinding.FragmentLocalMediaBinding
 import com.aiyifan.app.feature.localmedia.data.AndroidLocalMediaRepository
 import com.aiyifan.app.feature.localmedia.data.LocalMediaRepository
@@ -56,7 +57,11 @@ class LocalMediaFragment : Fragment() {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        binding.localBackButton.setOnClickListener { requireActivity().onBackPressedDispatcher.onBackPressed() }
+        binding.root.applySystemBarsPadding(left = true, right = true)
+        binding.localHeader.applySystemBarsPadding(top = true, growHeight = true)
+        binding.localRecycler.applySystemBarsPadding(bottom = true)
+        binding.localPermissionState.applySystemBarsPadding(bottom = true)
+        binding.localEmptyState.applySystemBarsPadding(bottom = true)
         adapter = LocalMediaAdapter { video ->
             startActivity(LocalVideoPlayerActivity.intent(requireContext(), video))
         }

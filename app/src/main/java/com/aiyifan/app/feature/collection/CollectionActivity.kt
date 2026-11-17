@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.collection
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -33,6 +37,11 @@ class CollectionActivity : AppCompatActivity() {
     private val failedKeys = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivityCollectionBinding.inflate(layoutInflater)
@@ -52,10 +61,15 @@ class CollectionActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!::binding.isInitialized) return
         render()
         checkUpdates(force = false)
     }
     override fun onStop() {
+        if (!::binding.isInitialized) {
+            super.onStop()
+            return
+        }
         checkGeneration++
         checkJob?.cancel()
         checkJob = null

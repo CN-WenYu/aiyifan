@@ -1,6 +1,5 @@
 package com.aiyifan.app.core.data.remote
 
-import com.aiyifan.app.core.data.FakeCatalogRepository
 import com.aiyifan.app.core.model.Category
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
@@ -16,7 +15,6 @@ class RemoteCatalogRepositoryHomePageTest {
     fun `loads server category identifiers from the navigation endpoint`() = runBlocking {
         val fetcher = MoviePageFetcher()
         val repository = RemoteCatalogRepository(
-            fallback = FakeCatalogRepository(),
             configResolver = RemoteConfigResolver(fetcher),
             fetcher = fetcher,
         )
@@ -31,7 +29,6 @@ class RemoteCatalogRepositoryHomePageTest {
     fun `loads only the selected category from its requested server page`() = runBlocking {
         val fetcher = MoviePageFetcher()
         val repository = RemoteCatalogRepository(
-            fallback = FakeCatalogRepository(),
             configResolver = RemoteConfigResolver(fetcher),
             fetcher = fetcher,
         )
@@ -60,7 +57,6 @@ class RemoteCatalogRepositoryHomePageTest {
                 HttpResponse(500, "unavailable")
         }
         val repository = RemoteCatalogRepository(
-            fallback = FakeCatalogRepository(),
             configResolver = RemoteConfigResolver(fetcher),
             fetcher = fetcher,
         )
@@ -83,7 +79,6 @@ class RemoteCatalogRepositoryHomePageTest {
             }
         }
         val repository = RemoteCatalogRepository(
-            fallback = FakeCatalogRepository(),
             configResolver = RemoteConfigResolver(fetcher),
             fetcher = fetcher,
         )

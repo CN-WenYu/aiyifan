@@ -3,7 +3,6 @@ package com.aiyifan.app.core.data.remote
 import com.aiyifan.app.core.data.FavoriteStore
 import com.aiyifan.app.core.data.InMemoryFavoriteStore
 import com.aiyifan.app.core.data.CatalogRepository
-import com.aiyifan.app.core.data.FakeCatalogRepository
 import com.aiyifan.app.core.data.HomeVideoPage
 import com.aiyifan.app.core.data.InMemoryWatchHistoryStore
 import com.aiyifan.app.core.data.WatchHistoryStore
@@ -25,7 +24,6 @@ import org.json.JSONObject
 import java.net.URLEncoder
 
 class RemoteCatalogRepository(
-    private val fallback: FakeCatalogRepository = FakeCatalogRepository(),
     private val configResolver: RemoteConfigResolver = RemoteConfigResolver(UrlConnectionHttpFetcher()),
     private val fetcher: HttpFetcher = UrlConnectionHttpFetcher(),
     private val historyStore: WatchHistoryStore = InMemoryWatchHistoryStore(),
@@ -149,38 +147,23 @@ class RemoteCatalogRepository(
         historyListeners.forEach { it() }
     }
 
-    override suspend fun getCategories(): List<Category> =
-        try {
-            ensureCategories()
-        } catch (exception: Throwable) {
-            if (exception is kotlinx.coroutines.CancellationException) throw exception
-            fallback.getCategories()
-        }
+    override suspend fun getCategories(): List<Category> = ensureCategories()
 
     override suspend fun getHomeVideos(categoryId: String): List<VideoSummary> =
-        try {
-            val sections = ensureSections()
+        ensureSections().let { sections ->
             sections.firstOrNull { it.name == categoryId }?.videos
-                ?: sections.firstOrNull()?.videos
-                ?: emptyList()
-        } catch (_: Throwable) {
-            fallback.getHomeVideos(categoryId)
+                ?: sections.firstOrNull()?.videos.orEmpty()
         }
 
     override suspend fun getHomeVideoPage(
         category: Category,
         page: Int,
         size: Int,
-    ): HomeVideoPage =
-        try {
-            require(page > 0) { "Page must be positive" }
-            require(size > 0) { "Page size must be positive" }
-            pageCache.get("home:${category.id}", "$page:$size") { fetchHomeVideoPage(category, page, size) }
-        } catch (exception: Throwable) {
-            if (exception is kotlinx.coroutines.CancellationException) throw exception
-            if (page > 1) throw exception
-            fallback.getHomeVideoPage(category, page, size)
-        }
+    ): HomeVideoPage {
+        require(page > 0) { "Page must be positive" }
+        require(size > 0) { "Page size must be positive" }
+        return pageCache.get("home:${category.id}", "$page:$size") { fetchHomeVideoPage(category, page, size) }
+    }
 
     override suspend fun refreshHomeVideoPage(category: Category, size: Int): HomeVideoPage {
         require(size > 0)
@@ -216,23 +199,20 @@ class RemoteCatalogRepository(
         }
     }
 
-    override suspend fun getHotVideos(): List<VideoSummary> =
-        try {
-            ensureSections()
-                .flatMap { it.videos }
-                .distinctBy { it.mediaKey }
-                .sortedByDescending { it.playCount }
-        } catch (_: Throwable) {
-            fallback.getHotVideos()
-        }
+    override suspend fun getHotVideos(): List<VideoSummary> = ensureSections()
+        .flatMap { it.videos }
+        .distinctBy { it.mediaKey }
+        .sortedByDescending { it.playCount }
 
     override suspend fun searchVideos(keyword: String): List<VideoSummary> {
         val query = keyword.trim()
         if (query.isEmpty()) return emptyList()
-        return runCatching { searchRemoteVideos(query) }
-            .getOrDefault(emptyList())
-            .ifEmpty { searchCachedVideos(query) }
-            .ifEmpty { fallback.searchVideos(query) }
+        return try {
+            searchRemoteVideos(query)
+        } catch (exception: Exception) {
+            if (exception is kotlinx.coroutines.CancellationException) throw exception
+            searchCachedVideos(query).ifEmpty { throw exception }
+        }
     }
 
     override suspend fun searchSuggestions(keyword: String): List<SearchSuggestion> {
@@ -242,9 +222,10 @@ class RemoteCatalogRepository(
             val baseUrl = configResolver.resolveBaseUrl()
             val response = fetcher.get(buildUrl(baseUrl, "api/Home/GetKeyWord", mapOf("keyword" to query)))
             if (response.code !in 200..299) throw IllegalStateException("Suggest failed: ${response.code}")
-            parseSearchSuggestions(response.body, query)
-        } catch (_: Throwable) {
-            localSuggestions(query)
+            parseSearchSuggestions(response.body)
+        } catch (exception: Exception) {
+            if (exception is kotlinx.coroutines.CancellationException) throw exception
+            localSuggestionFallback(query).ifEmpty { throw exception }
         }
     }
 
@@ -252,13 +233,7 @@ class RemoteCatalogRepository(
         detailCache[mediaKey]?.let { return it }
         return detailLock.withLock {
             detailCache[mediaKey]?.let { return@withLock it }
-            val detail = try {
-                fetchVideoDetail(mediaKey).also { detailCache[mediaKey] = it }
-            } catch (exception: Throwable) {
-                if (exception is kotlinx.coroutines.CancellationException) throw exception
-                fallback.getVideoDetail(mediaKey)
-            }
-            detail
+            fetchVideoDetail(mediaKey).also { detailCache[mediaKey] = it }
         }
     }
 
@@ -317,7 +292,7 @@ class RemoteCatalogRepository(
         return parsePlayableEpisodeStrict(response.body, episode, episode.resolution)
     }
 
-    override fun getComments(mediaKey: String): List<Comment> = fallback.getComments(mediaKey)
+    override fun getComments(mediaKey: String): List<Comment> = emptyList()
 
     override fun saveHistory(detail: VideoDetail, episode: Episode, progressMs: Long, durationMs: Long) {
         historyStore.save(
@@ -364,7 +339,7 @@ class RemoteCatalogRepository(
         return cacheLock.withLock {
             cachedCategories?.let { return@withLock it }
             fetchCategories().also { parsed ->
-                cachedCategories = parsed
+                cachedCategories = parsed.takeIf { it.isNotEmpty() }
             }
         }
     }
@@ -375,10 +350,10 @@ class RemoteCatalogRepository(
         if (response.code !in 200..299) {
             throw IllegalStateException("Navigation request failed: ${response.code}")
         }
-        val items = JSONObject(response.body)
-            .optJSONObject("data")
-            ?.optJSONArray("list")
-            ?: JSONArray()
+        val root = JSONObject(response.body)
+        check(!root.has("ret") || root.optInt("ret") == 200) { "Navigation service rejected request" }
+        val items = root.optJSONObject("data")?.optJSONArray("list")
+            ?: throw IllegalStateException("Missing navigation list")
         return buildList {
             for (index in 0 until items.length()) {
                 val item = items.optJSONObject(index) ?: continue
@@ -394,8 +369,6 @@ class RemoteCatalogRepository(
                     ),
                 )
             }
-        }.also { categories ->
-            check(categories.isNotEmpty()) { "Navigation response contains no categories" }
         }
     }
 
@@ -405,9 +378,10 @@ class RemoteCatalogRepository(
         if (response.code !in 200..299) {
             throw IllegalStateException("Home request failed: ${response.code}")
         }
-        return TripDataHomeParser.parse(response.body).also { sections ->
-            check(sections.isNotEmpty()) { "Home response contains no sections" }
-        }
+        val root = JSONObject(response.body)
+        check(!root.has("ret") || root.optInt("ret") == 200) { "Home service rejected request" }
+        check(root.optJSONObject("data")?.optJSONArray("list") != null) { "Missing home list" }
+        return TripDataHomeParser.parse(response.body)
     }
 
     private fun parseVideoDetail(payload: String): VideoDetail {
@@ -550,15 +524,10 @@ class RemoteCatalogRepository(
         return parseSearchVideos(payload)
     }
 
-    private suspend fun searchCachedVideos(query: String): List<VideoSummary> =
-        try {
-            ensureSections()
-                .flatMap { it.videos }
-                .distinctBy { it.mediaKey }
-                .filter { video -> video.matchesSearch(query) }
-        } catch (_: Throwable) {
-            emptyList()
-        }
+    private fun searchCachedVideos(query: String): List<VideoSummary> = cachedSections.orEmpty()
+        .flatMap { it.videos }
+        .distinctBy { it.mediaKey }
+        .filter { video -> video.matchesSearch(query) }
 
     private fun parseSearchVideos(payload: JSONObject): List<VideoSummary> {
         val data = payload.opt("data")
@@ -567,8 +536,8 @@ class RemoteCatalogRepository(
             is JSONObject -> data.optJSONArray("list")
                 ?: data.optJSONArray("videoList")
                 ?: data.optJSONArray("items")
-                ?: JSONArray()
-            else -> JSONArray()
+                ?: throw IllegalStateException("Missing search list")
+            else -> throw IllegalStateException("Missing search data")
         }
         return buildList {
             for (index in 0 until items.length()) {
@@ -610,25 +579,15 @@ class RemoteCatalogRepository(
     private fun JSONObject.optionalRemoteSecond(key: String): Long? =
         opt(key)?.toString()?.toLongOrNull()?.takeIf { it in 0L..MAX_PLAYBACK_SECOND }
 
-    private suspend fun localSuggestions(query: String): List<SearchSuggestion> =
-        try {
-            ensureSections()
-                .flatMap { it.videos }
-                .flatMap { video -> listOf(video.title, video.actor.orEmpty(), video.director.orEmpty()) }
-                .filter { value -> value.contains(query, ignoreCase = true) }
-                .distinct()
-                .take(8)
-                .map(::SearchSuggestion)
-        } catch (_: Throwable) {
-            fallback.searchSuggestions(query)
-        }
-
-    private fun parseSearchSuggestions(payload: String, query: String): List<SearchSuggestion> {
-        val data = JSONObject(payload).opt("data")
+    private fun parseSearchSuggestions(payload: String): List<SearchSuggestion> {
+        val root = JSONObject(payload)
+        check(!root.has("ret") || root.optInt("ret") == 200) { "Suggestion service rejected request" }
+        val data = root.opt("data")
         val items = when (data) {
             is JSONArray -> data
-            is JSONObject -> data.optJSONArray("list") ?: data.optJSONArray("items") ?: JSONArray()
-            else -> JSONArray()
+            is JSONObject -> data.optJSONArray("list") ?: data.optJSONArray("items")
+                ?: throw IllegalStateException("Missing suggestion list")
+            else -> throw IllegalStateException("Missing suggestion data")
         }
         return buildList {
             for (index in 0 until items.length()) {
@@ -642,7 +601,7 @@ class RemoteCatalogRepository(
                 }.trim()
                 if (value.isNotBlank()) add(SearchSuggestion(value))
             }
-        }.distinctBy { it.keyword }.take(8).ifEmpty { localSuggestionFallback(query) }
+        }.distinctBy { it.keyword }.take(8)
     }
 
     private fun localSuggestionFallback(query: String): List<SearchSuggestion> =

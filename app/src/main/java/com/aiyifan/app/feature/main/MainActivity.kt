@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.main
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.Gravity
@@ -31,6 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!::binding.isInitialized) return
         downloadRecovery = lifecycleScope.launch {
             try { AppGraph.downloadRepository.recoverFromForeground() }
             catch (error: CancellationException) { throw error }
@@ -46,6 +51,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -114,7 +124,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putInt(KEY_SELECTED_TAB, binding.bottomTabs.selectedTabPosition)
+        if (::binding.isInitialized) outState.putInt(KEY_SELECTED_TAB, binding.bottomTabs.selectedTabPosition)
         super.onSaveInstanceState(outState)
     }
 

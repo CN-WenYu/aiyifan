@@ -1,7 +1,12 @@
 package com.aiyifan.app.feature.home
 
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -24,6 +29,7 @@ import com.aiyifan.app.feature.history.HistoryActivity
 import com.aiyifan.app.feature.search.SearchActivity
 import com.aiyifan.app.feature.video.VideoPlayerActivity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class HomeFragment : Fragment() {
@@ -33,12 +39,20 @@ class HomeFragment : Fragment() {
     private lateinit var adapter: HomeVideoAdapter
     private lateinit var bannerAdapter: HomeBannerAdapter
     private lateinit var continueAdapter: ContinueWatchingAdapter
+    private lateinit var statusAdapter: HomeStatusAdapter
     private lateinit var continueStore: ContinueWatchingStore
     private var removeHistoryListener: (() -> Unit)? = null
     private val pagination = HomeFeedPagination()
     private var selectedCategory: Category? = null
     private var homeRequestVersion = 0L
     private var isInitialPageLoading = false
+    private var homeJob: Job? = null
+    private var pageJob: Job? = null
+    private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var networkAvailable: Boolean? = null
+    private val connectivityManager: ConnectivityManager
+        get() = requireContext().getSystemService(ConnectivityManager::class.java)
 
     private val initialCategoryId: String?
         get() = arguments?.getString(ARG_INITIAL_CATEGORY_ID)
@@ -61,23 +75,25 @@ class HomeFragment : Fragment() {
             onHide = { continueStore.hide(it); refreshContinueWatching() },
             onAll = { startActivity(Intent(requireContext(), HistoryActivity::class.java)) },
         )
+        statusAdapter = HomeStatusAdapter { loadHome(forceRefresh = true) }
         binding.videoRecycler.layoutManager = GridLayoutManager(requireContext(), 2).apply {
             spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
                 override fun getSpanSize(position: Int): Int =
                     when {
                         position < bannerAdapter.itemCount -> 2
                         position < bannerAdapter.itemCount + continueAdapter.itemCount -> 2
-                        else -> adapter.spanSizeAt(position - bannerAdapter.itemCount - continueAdapter.itemCount)
+                        position < bannerAdapter.itemCount + continueAdapter.itemCount + statusAdapter.itemCount -> 2
+                        else -> adapter.spanSizeAt(position - bannerAdapter.itemCount - continueAdapter.itemCount - statusAdapter.itemCount)
                     }
             }
         }
-        binding.videoRecycler.adapter = ConcatAdapter(bannerAdapter, continueAdapter, adapter)
+        binding.videoRecycler.adapter = ConcatAdapter(bannerAdapter, continueAdapter, statusAdapter, adapter)
         refreshContinueWatching()
         binding.homeRefresh.setColorSchemeResources(R.color.accent)
         binding.homeRefresh.setProgressBackgroundColorSchemeResource(R.color.surface)
         binding.videoRecycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                if (dy <= 0 || recyclerView.canScrollVertically(1) || isInitialPageLoading) return
+                if (dy <= 0 || recyclerView.canScrollVertically(1) || isInitialPageLoading || networkAvailable != true) return
                 val category = selectedCategory ?: return
                 val page = pagination.beginNextPage()
                 if (page == null) {
@@ -98,7 +114,75 @@ class HomeFragment : Fragment() {
             startActivity(Intent(requireContext(), com.aiyifan.app.feature.navigation.NavigationActivity::class.java))
         }
         binding.homeRefresh.setOnRefreshListener { loadHome(forceRefresh = true) }
-        loadHome()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            private fun refreshConnectivity() {
+                mainHandler.post {
+                    if (connectivityCallback === this && _binding != null) updateConnectivity()
+                }
+            }
+            override fun onAvailable(network: Network) = refreshConnectivity()
+            override fun onLost(network: Network) = refreshConnectivity()
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = refreshConnectivity()
+        }
+        connectivityCallback = callback
+        connectivityManager.registerDefaultNetworkCallback(callback)
+        updateConnectivity()
+    }
+
+    override fun onStop() {
+        connectivityCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
+        connectivityCallback = null
+        cancelRequests()
+        super.onStop()
+    }
+
+    private fun isNetworkAvailable(): Boolean {
+        val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
+        return capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    private fun updateConnectivity() {
+        val available = isNetworkAvailable()
+        val connectivityChanged = networkAvailable != available
+        val wasOffline = networkAvailable == false || statusAdapter.status == HomeStatus.OFFLINE
+        val needsInitialLoad = statusAdapter.status == HomeStatus.LOADING && !isInitialPageLoading
+        networkAvailable = available
+        if (!available) {
+            if (connectivityChanged || statusAdapter.status != HomeStatus.OFFLINE) showOffline()
+        } else if (connectivityChanged || wasOffline || needsInitialLoad) {
+            loadHome(forceRefresh = wasOffline)
+        }
+    }
+
+    private fun cancelRequests() {
+        homeRequestVersion++
+        homeJob?.cancel()
+        pageJob?.cancel()
+        homeJob = null
+        pageJob = null
+        isInitialPageLoading = false
+        pagination.cancelPending()
+        adapter.setLoadMoreLoading(false)
+        _binding?.homeRefresh?.isRefreshing = false
+    }
+
+    private fun showOffline() {
+        networkAvailable = false
+        cancelRequests()
+        showStatus(HomeStatus.OFFLINE)
+        refreshContinueWatching()
+    }
+
+    private fun showStatus(status: HomeStatus) {
+        pagination.clear()
+        bannerAdapter.submitList(emptyList())
+        adapter.submitList(emptyList())
+        statusAdapter.submitStatus(status)
     }
 
     override fun onResume() {
@@ -118,23 +202,37 @@ class HomeFragment : Fragment() {
     }
 
     private fun loadHome(forceRefresh: Boolean = false) {
+        if (!isNetworkAvailable()) {
+            showOffline()
+            return
+        }
+        networkAvailable = true
+        homeJob?.cancel()
+        pageJob?.cancel()
         val requestVersion = ++homeRequestVersion
         isInitialPageLoading = true
         pagination.cancelPending()
         adapter.setLoadMoreLoading(false)
-        viewLifecycleOwner.lifecycleScope.launch {
+        statusAdapter.submitStatus(HomeStatus.LOADING)
+        homeJob = viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val categories = repository.getCategories()
                 if (!isCurrentRequest(requestVersion)) return@launch
                 val category = categories.firstOrNull { it.id == selectedCategory?.id }
                     ?: categories.firstOrNull { it.id == initialCategoryId }
-                    ?: categories.first()
+                    ?: categories.firstOrNull()
                 selectedCategory = category
                 renderCategories(categories)
+                if (category == null) {
+                    showStatus(HomeStatus.EMPTY)
+                    return@launch
+                }
                 submitHomeFeed(category, requestVersion, forceRefresh)
             } catch (exception: Throwable) {
                 if (exception is CancellationException) throw exception
-                showToast("首页刷新失败")
+                if (isCurrentRequest(requestVersion)) {
+                    if (!isNetworkAvailable()) showOffline() else showStatus(HomeStatus.ERROR)
+                }
             } finally {
                 if (isCurrentRequest(requestVersion)) {
                     isInitialPageLoading = false
@@ -152,6 +250,7 @@ class HomeFragment : Fragment() {
         val sections = HomeFeedSections.from(videos)
         bannerAdapter.submitList(sections.banner)
         adapter.submitList(sections.cards)
+        statusAdapter.submitStatus(if (videos.isEmpty()) HomeStatus.EMPTY else HomeStatus.CONTENT)
     }
 
     private fun renderCategories(categories: List<Category>) {
@@ -177,6 +276,12 @@ class HomeFragment : Fragment() {
     }
 
     private fun selectCategory(category: Category) {
+        if (!isNetworkAvailable()) {
+            showOffline()
+            return
+        }
+        homeJob?.cancel()
+        pageJob?.cancel()
         val requestVersion = ++homeRequestVersion
         selectedCategory = category
         isInitialPageLoading = true
@@ -188,15 +293,19 @@ class HomeFragment : Fragment() {
         pagination.clear()
         bannerAdapter.submitList(emptyList())
         adapter.submitList(emptyList())
-        viewLifecycleOwner.lifecycleScope.launch {
+        statusAdapter.submitStatus(HomeStatus.LOADING)
+        homeJob = viewLifecycleOwner.lifecycleScope.launch {
             try {
                 submitHomeFeed(category, requestVersion)
             } catch (exception: Throwable) {
                 if (exception is CancellationException) throw exception
-                showToast("分类数据加载失败")
+                if (isCurrentRequest(requestVersion)) {
+                    if (!isNetworkAvailable()) showOffline() else showStatus(HomeStatus.ERROR)
+                }
             } finally {
                 if (isCurrentRequest(requestVersion)) {
                     isInitialPageLoading = false
+                    _binding?.homeRefresh?.isRefreshing = false
                 }
             }
         }
@@ -213,7 +322,7 @@ class HomeFragment : Fragment() {
     private fun loadNextPage(category: Category, page: Int, requestVersion: Long) {
         val categoryId = category.id
         adapter.setLoadMoreLoading(true)
-        viewLifecycleOwner.lifecycleScope.launch {
+        pageJob = viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val response = repository.getHomeVideoPage(category, page)
                 if (isCurrentRequest(requestVersion) && selectedCategory?.id == categoryId) {
@@ -222,6 +331,10 @@ class HomeFragment : Fragment() {
             } catch (exception: Throwable) {
                 if (exception is CancellationException) throw exception
                 if (isCurrentRequest(requestVersion) && selectedCategory?.id == categoryId) {
+                    if (!isNetworkAvailable()) {
+                        showOffline()
+                        return@launch
+                    }
                     pagination.fail(page)
                     adapter.setLoadMoreLoading(false)
                     showToast("加载更多失败")
@@ -231,13 +344,15 @@ class HomeFragment : Fragment() {
     }
 
     private fun isCurrentRequest(requestVersion: Long): Boolean =
-        requestVersion == homeRequestVersion
+        _binding != null && connectivityCallback != null && networkAvailable == true && requestVersion == homeRequestVersion
 
     private fun showToast(message: String) {
         context?.let { Toast.makeText(it, message, Toast.LENGTH_SHORT).show() }
     }
 
     override fun onDestroyView() {
+        cancelRequests()
+        binding.videoRecycler.adapter = null
         _binding = null
         super.onDestroyView()
     }

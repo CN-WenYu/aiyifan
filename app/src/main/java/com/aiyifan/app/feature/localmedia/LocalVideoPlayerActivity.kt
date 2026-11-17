@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.localmedia
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -45,6 +49,11 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.LOCAL) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivityLocalVideoPlayerBinding.inflate(layoutInflater)
@@ -149,6 +158,10 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        if (!::binding.isInitialized) {
+            super.onStop()
+            return
+        }
         resetFullscreenLock()
         if (::player.isInitialized) player.pause()
         if (::player.isInitialized && !finishedPlayback) {
@@ -158,6 +171,10 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (!::binding.isInitialized) {
+            super.onDestroy()
+            return
+        }
         resetFullscreenLock()
         screenObserver?.release()
         if (::screenAwakeController.isInitialized) {

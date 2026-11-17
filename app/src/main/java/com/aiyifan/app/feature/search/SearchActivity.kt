@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.search
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.content.Context
 import android.os.Bundle
 import android.text.Editable
@@ -35,10 +39,17 @@ class SearchActivity : AppCompatActivity() {
     private lateinit var suggestionAdapter: SearchSuggestionAdapter
     private val historyPrefs by lazy { getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     private var suggestionJob: Job? = null
+    private var searchJob: Job? = null
+    private var searchRequestVersion = 0L
     private var historyExpanded = false
     private var lastSearchKeyword = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivitySearchBinding.inflate(layoutInflater)
@@ -99,6 +110,8 @@ class SearchActivity : AppCompatActivity() {
 
     private fun requestSuggestions(keyword: String) {
         suggestionJob?.cancel()
+        searchJob?.cancel()
+        searchRequestVersion++
         if (keyword.isBlank()) {
             renderInitialState()
             return
@@ -132,13 +145,16 @@ class SearchActivity : AppCompatActivity() {
             return
         }
         suggestionJob?.cancel()
+        searchJob?.cancel()
+        val requestVersion = ++searchRequestVersion
         lastSearchKeyword = keyword
         binding.initialScroll.isVisible = false
         binding.suggestionRecycler.isVisible = false
         renderSearchState(SearchPageState.Loading)
-        lifecycleScope.launch {
+        searchJob = lifecycleScope.launch {
             runCatching { AppGraph.catalogRepository.searchVideos(keyword) }
                 .onSuccess { results ->
+                    if (requestVersion != searchRequestVersion) return@onSuccess
                     saveKeyword(keyword)
                     renderSearchState(
                         if (results.isEmpty()) SearchPageState.Empty else SearchPageState.Success,
@@ -147,7 +163,7 @@ class SearchActivity : AppCompatActivity() {
                 }
                 .onFailure { error ->
                     if (error is CancellationException) throw error
-                    renderSearchState(SearchPageState.Failure)
+                    if (requestVersion == searchRequestVersion) renderSearchState(SearchPageState.Failure)
                 }
         }
     }
@@ -171,7 +187,6 @@ class SearchActivity : AppCompatActivity() {
         binding.suggestionRecycler.isVisible = false
         binding.resultsContainer.isVisible = false
         renderHistory()
-        renderKeywords(binding.hotContainer, HOT_KEYWORDS)
     }
 
     private fun renderHistory() {
@@ -251,6 +266,7 @@ class SearchActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         suggestionJob?.cancel()
+        searchJob?.cancel()
         super.onDestroy()
     }
 
@@ -261,6 +277,5 @@ class SearchActivity : AppCompatActivity() {
         const val HISTORY_LIMIT = 20
         const val HISTORY_PREVIEW_SIZE = 10
         const val SUGGESTION_DELAY_MS = 300L
-        val HOT_KEYWORDS = listOf("迷城风云", "长河旧事", "星桥少年", "烟火地图", "电影", "动漫")
     }
 }

@@ -1,5 +1,9 @@
 package com.aiyifan.app.feature.navigation
 
+import com.aiyifan.app.core.startup.AppMode
+import com.aiyifan.app.core.startup.StartupSession
+import com.aiyifan.app.feature.startup.StartupActivity
+
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -37,6 +41,11 @@ class NavigationResultsActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (StartupSession.mode != AppMode.ONLINE) {
+            super.onCreate(null)
+            StartupActivity.restart(this)
+            return
+        }
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivitySimpleListBinding.inflate(layoutInflater)

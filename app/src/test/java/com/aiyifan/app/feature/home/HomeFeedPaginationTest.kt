@@ -38,5 +38,20 @@ class HomeFeedPaginationTest {
         assertNull(pager.beginNextPage())
     }
 
+    @Test
+    fun `clearing offline feed drops pending page results and disables pagination`() {
+        val pager = HomeFeedPagination()
+        pager.reset(HomeVideoPage(listOf(video("online")), hasMore = true))
+        val pendingPage = pager.beginNextPage()!!
+
+        pager.clear()
+
+        assertEquals(emptyList<VideoSummary>(), pager.append(pendingPage, HomeVideoPage(listOf(video("stale")), hasMore = true)))
+        assertFalse(pager.hasMore)
+        assertNull(pager.beginNextPage())
+        assertEquals(listOf("reconnected"), pager.reset(HomeVideoPage(listOf(video("reconnected")), hasMore = true)).map { it.mediaKey })
+        assertEquals(2, pager.beginNextPage())
+    }
+
     private fun video(key: String) = VideoSummary(key, title = key, coverUrl = "", videoType = 0)
 }
