@@ -21,7 +21,7 @@ object PlaybackPresentationPolicy {
     fun destinationWhenLeaving(value: PlaybackCapabilities): PlaybackDestination = when {
         !value.hasPlayableMedia || !value.isPrepared || !value.isPlaying -> PlaybackDestination.NONE
         value.supportsPictureInPicture && value.pictureInPictureEnabled -> PlaybackDestination.PICTURE_IN_PICTURE
-        value.hasOverlayPermission -> PlaybackDestination.OVERLAY
+        // Cross-app overlays require an explicit button press, even when permission is granted.
         else -> PlaybackDestination.IN_APP_MINI_PLAYER
     }
 }

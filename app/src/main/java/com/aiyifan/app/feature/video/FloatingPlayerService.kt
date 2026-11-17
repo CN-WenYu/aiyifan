@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.os.ResultReceiver
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.DisplayMetrics
@@ -21,6 +22,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.content.IntentCompat
 import androidx.media3.ui.PlayerView
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
@@ -39,6 +41,7 @@ class FloatingPlayerService : Service() {
     private var floatingRoot: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var hiddenEdge: FloatingWindowEdge? = null
+    private var expandedWindowWidth = 0
     private var isClosing = false
     private var offlineErrorShown = false
     private var sleepTimerDialog: androidx.appcompat.app.AlertDialog? = null
@@ -53,14 +56,20 @@ class FloatingPlayerService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!Settings.canDrawOverlays(this)) {
-            stopSelf(startId)
+        val receiver = intent?.let { IntentCompat.getParcelableExtra(it, EXTRA_RESULT, ResultReceiver::class.java) }
+        val selectionMatches = intent?.hasExtra(EXTRA_SELECTION_TOKEN) != true ||
+            (intent.getLongExtra(EXTRA_SELECTION_TOKEN, -1L) == controller.selectionToken &&
+                intent.getLongExtra(EXTRA_REQUEST_ID, -1L) == pendingStartId)
+        if (isClosing || !Settings.canDrawOverlays(this) || !selectionMatches ||
+            !controller.isPrepared || controller.hasPlaybackError
+        ) {
+            receiver?.send(RESULT_FAILED, null)
+            if (floatingRoot == null || !Settings.canDrawOverlays(this)) stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        if (floatingRoot == null) {
-            showFloatingPlayer()
-        }
+        val started = floatingRoot != null || showFloatingPlayer()
+        receiver?.send(if (started) RESULT_STARTED else RESULT_FAILED, null)
         return START_NOT_STICKY
     }
 
@@ -70,20 +79,22 @@ class FloatingPlayerService : Service() {
         super.onDestroy()
     }
 
-    private fun showFloatingPlayer() {
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildMediaNotification())
-
-        val root = LayoutInflater.from(this).inflate(R.layout.view_floating_player, null)
-        val params = createLayoutParams()
-        floatingRoot = root
-        layoutParams = params
-        bindControls(root)
-        showControls(root)
-
+    private fun showFloatingPlayer(): Boolean {
+        var attachmentAttempted = false
         try {
-            controller.attach(root.findViewById<PlayerView>(R.id.floatingPlayerView))
+            createNotificationChannel()
+            startForeground(NOTIFICATION_ID, buildMediaNotification())
+
+            val root = LayoutInflater.from(this).inflate(R.layout.view_floating_player, null)
+            val params = createLayoutParams()
+            floatingRoot = root
+            layoutParams = params
+            bindControls(root)
+            showControls(root)
+
             windowManager.addView(root, params)
+            attachmentAttempted = true
+            controller.attach(root.findViewById<PlayerView>(R.id.floatingPlayerView))
             controller.hasOverlayOwner = true
             removePositionListener = controller.addPositionListener { positionMs ->
                 serviceScope.launch { controller.advanceAutomatically(positionMs) }
@@ -117,14 +128,12 @@ class FloatingPlayerService : Service() {
                     }
                 }
             }
+            return !isClosing && controller.hasOverlayOwner
         } catch (exception: RuntimeException) {
-            controller.hasOverlayOwner = false
-            controller.pause()
-            controller.detach()
-            floatingRoot = null
-            layoutParams = null
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            if (attachmentAttempted) controller.detach()
+            // The Activity still owns the session and will restore its surface on failure.
+            closeFloatingPlayer(stopService = true, releasePlayback = false)
+            return false
         }
     }
 
@@ -310,15 +319,20 @@ class FloatingPlayerService : Service() {
 
     private fun restorePlayerActivity() {
         val session = controller.activeSession ?: return
+        try {
+            startActivity(
+                (session.offlineDownloadId?.let { VideoPlayerActivity.offlineIntent(this, it, session.detail.mediaKey) }
+                    ?: VideoPlayerActivity.intent(this, session.detail.mediaKey)).addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+                ),
+            )
+        } catch (_: RuntimeException) {
+            Toast.makeText(this, R.string.floating_player_restore_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
         FloatingPlayerRecovery.record(this, controller.currentPositionMs)
         controller.detach()
         closeFloatingPlayer(stopService = true, releasePlayback = false)
-        startActivity(
-            (session.offlineDownloadId?.let { VideoPlayerActivity.offlineIntent(this, it, session.detail.mediaKey) }
-                ?: VideoPlayerActivity.intent(this, session.detail.mediaKey)).addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
-            ),
-        )
     }
 
     private fun displayMetrics(): DisplayMetrics = DisplayMetrics().also { metrics ->
@@ -349,11 +363,20 @@ class FloatingPlayerService : Service() {
     }
 
     private fun updateLayout(params: WindowManager.LayoutParams) {
-        floatingRoot?.let { windowManager.updateViewLayout(it, params) }
+        try {
+            if (!Settings.canDrawOverlays(this)) {
+                closeFloatingPlayer(stopService = true)
+                return
+            }
+            floatingRoot?.let { windowManager.updateViewLayout(it, params) }
+        } catch (_: RuntimeException) {
+            closeFloatingPlayer(stopService = true)
+        }
     }
 
     private fun resizeFloatingPlayer(requestedWidth: Int): Int {
         val params = layoutParams ?: return requestedWidth
+        if (hiddenEdge != null) return expandedWindowWidth
         val metrics = displayMetrics()
         val size = FloatingWindowSizePolicy.fit(
             requestedWidth, dpToPx(MIN_WIDTH_DP), dpToPx(MAX_WIDTH_DP), metrics.widthPixels, metrics.heightPixels,
@@ -372,11 +395,17 @@ class FloatingPlayerService : Service() {
         super.onConfigurationChanged(newConfig)
         val params = layoutParams ?: return
         val edge = hiddenEdge
-        resizeFloatingPlayer(params.width)
-        if (edge != null) {
+        if (edge == null) {
+            resizeFloatingPlayer(params.width)
+        } else {
             val metrics = displayMetrics()
-            params.x = if (edge == FloatingWindowEdge.LEFT) -(params.width - dpToPx(HIDDEN_HANDLE_WIDTH_DP))
-            else metrics.widthPixels - dpToPx(HIDDEN_HANDLE_WIDTH_DP)
+            val size = FloatingWindowSizePolicy.fit(
+                expandedWindowWidth, dpToPx(MIN_WIDTH_DP), dpToPx(MAX_WIDTH_DP), metrics.widthPixels, metrics.heightPixels,
+            )
+            expandedWindowWidth = size.width
+            params.height = size.height
+            params.x = if (edge == FloatingWindowEdge.LEFT) 0 else metrics.widthPixels - params.width
+            params.y = clampPosition(params).y
             updateLayout(params)
         }
     }
@@ -405,6 +434,12 @@ class FloatingPlayerService : Service() {
             hiddenEdge?.let { edge ->
                 root.removeCallbacks(controlsAutoHideRunnable)
                 hideControls(root)
+                // Android may clamp overlay windows back onto the display even with NO_LIMITS.
+                // Use a real narrow window while stashed; the same player keeps its session/audio.
+                expandedWindowWidth = params.width
+                params.width = dpToPx(HIDDEN_HANDLE_WIDTH_DP).coerceAtMost(params.width)
+                params.x = if (edge == FloatingWindowEdge.LEFT) 0 else displayMetrics.widthPixels - params.width
+                root.findViewById<PlayerView>(R.id.floatingPlayerView).visibility = View.INVISIBLE
                 showRestoreHandle(root, edge)
             } ?: hideRestoreHandle(root)
         }
@@ -416,6 +451,7 @@ class FloatingPlayerService : Service() {
         val params = layoutParams ?: return
         val edge = hiddenEdge ?: return
         val displayMetrics = displayMetrics()
+        params.width = expandedWindowWidth
         params.x = FloatingWindowPositionPolicy.visibleXForEdge(
             edge = edge,
             windowWidth = params.width,
@@ -423,6 +459,7 @@ class FloatingPlayerService : Service() {
         )
         clampPosition(params).also { params.y = it.y }
         hiddenEdge = null
+        root.findViewById<PlayerView>(R.id.floatingPlayerView).visibility = View.VISIBLE
         hideRestoreHandle(root)
         updateLayout(params)
         if (showControls) showControls(root)
@@ -516,6 +553,13 @@ class FloatingPlayerService : Service() {
     }
 
     companion object {
+        const val RESULT_STARTED = 1
+        private const val RESULT_FAILED = 0
+        private const val EXTRA_RESULT = "overlayStartResult"
+        private const val EXTRA_SELECTION_TOKEN = "overlaySelectionToken"
+        private const val EXTRA_REQUEST_ID = "overlayRequestId"
+        private var nextStartId = 0L
+        private var pendingStartId: Long? = null
         const val NOTIFICATION_ID = 4101
         private const val NOTIFICATION_CHANNEL_ID = "floating_video_playback"
         private const val DEFAULT_WIDTH_DP = 320
@@ -528,5 +572,21 @@ class FloatingPlayerService : Service() {
         private const val DOUBLE_TAP_TIMEOUT_MS = 300L
 
         fun intent(context: Context): Intent = Intent(context, FloatingPlayerService::class.java)
+
+        // Requests are issued, cancelled and consumed on the main thread in this process.
+        fun startIntent(context: Context, selectionToken: Long, result: ResultReceiver): Intent {
+            val requestId = ++nextStartId
+            pendingStartId = requestId
+            return intent(context)
+                .putExtra(EXTRA_SELECTION_TOKEN, selectionToken)
+                .putExtra(EXTRA_REQUEST_ID, requestId)
+                .putExtra(EXTRA_RESULT, result)
+        }
+
+        fun clearStartRequest(intent: Intent): Boolean {
+            if (intent.getLongExtra(EXTRA_REQUEST_ID, -1L) != pendingStartId) return false
+            pendingStartId = null
+            return true
+        }
     }
 }

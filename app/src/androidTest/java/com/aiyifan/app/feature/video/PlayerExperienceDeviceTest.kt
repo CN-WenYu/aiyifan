@@ -33,6 +33,85 @@ class PlayerExperienceDeviceTest {
     private val automation get() = instrumentation.uiAutomation
 
     @Test
+    fun permissionSettingsReturnRequiresAnotherClickAndNeverOpensPip() = withPlayback { scenario, controller ->
+        val previousMode = shell("appops get ${context.packageName} SYSTEM_ALERT_WINDOW")
+        val restoreMode = Regex("SYSTEM_ALERT_WINDOW: (allow|ignore|deny|default|foreground)")
+            .find(previousMode)?.groupValues?.get(1) ?: "default"
+        lateinit var activity: VideoPlayerActivity
+        try {
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW deny")
+            scenario.onActivity {
+                activity = it
+                controller.togglePlayPause()
+                it.findViewById<ImageButton>(R.id.floatingWindowButton).performClick()
+                assertFalse(it.isInPictureInPictureMode)
+            }
+            await { !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+            assertFalse(mainValue { activity.isInPictureInPictureMode })
+            assertFalse(mainValue { controller.hasOverlayOwner })
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
+            shell("input keyevent KEYCODE_BACK")
+            await { activity.lifecycle.currentState == Lifecycle.State.RESUMED }
+            scenario.onActivity {
+                assertFalse(controller.hasOverlayOwner)
+                assertFalse(it.isInPictureInPictureMode)
+                assertNotNull(it.findViewById<androidx.media3.ui.PlayerView>(R.id.playerView).player)
+                it.findViewById<ImageButton>(R.id.floatingWindowButton).performClick()
+            }
+            await { controller.hasOverlayOwner }
+        } finally {
+            context.stopService(FloatingPlayerService.intent(context))
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW $restoreMode")
+        }
+    }
+
+    @Test
+    fun overlayKeepsPlayingWhileStashedOnBothEdges() = withPlayback { scenario, controller ->
+        val previousMode = shell("appops get ${context.packageName} SYSTEM_ALERT_WINDOW")
+        val restoreMode = Regex("SYSTEM_ALERT_WINDOW: (allow|ignore|deny|default|foreground)")
+            .find(previousMode)?.groupValues?.get(1) ?: "default"
+        val originalFlags = automation.serviceInfo.flags
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
+            scenario.onActivity {
+                controller.togglePlayPause()
+                it.findViewById<ImageButton>(R.id.floatingWindowButton).performClick()
+            }
+            await { controller.hasOverlayOwner && controller.isPlaying }
+            val width = context.resources.displayMetrics.widthPixels
+            for (edge in listOf(0, width - 1)) {
+                val before = bounds("floatingPlayerView")
+                val y = before.top + before.height() * 3 / 4
+                shell("input swipe ${before.centerX()} $y $edge $y 500")
+                // The handle becomes VISIBLE before WindowManager applies its new bounds.
+                await {
+                    val handleBounds = node("floatingRestoreHandle")?.let { Rect().also(it::getBoundsInScreen) }
+                    handleBounds != null && if (edge == 0) handleBounds.left == 0 else handleBounds.right == width
+                }
+                val handle = bounds("floatingRestoreHandle")
+                assertTrue("Only the edge handle should remain visible", handle.width() < before.width() / 4)
+                assertTrue("Handle must remain on screen", handle.left >= 0 && handle.right <= width)
+                val visibleVideo = node("floatingPlayerView")?.let { Rect().also(it::getBoundsInScreen) }
+                assertTrue("Video should be stashed, not clamped back onscreen: $visibleVideo", visibleVideo == null || visibleVideo.width() <= handle.width() + 2)
+                val position = mainValue { controller.currentPositionMs }
+                await { controller.isPlaying && controller.currentPositionMs > position + 300L }
+                screenshot(if (edge == 0) "floating-left-edge.png" else "floating-right-edge.png")
+                shell("input tap ${handle.centerX()} ${handle.centerY()}")
+                await { node("floatingRestoreHandle") == null }
+                assertTrue(bounds("floatingPlayerView").width() > handle.width())
+            }
+        } finally {
+            context.stopService(FloatingPlayerService.intent(context))
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW $restoreMode")
+            automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
+        }
+    }
+
+    @Test
     @androidx.test.filters.SdkSuppress(minSdkVersion = 26)
     fun systemPipContainsOnlyVideoAndReturnsToDetail() = withPlayback { scenario, controller ->
         org.junit.Assume.assumeTrue(context.packageManager.hasSystemFeature(
@@ -108,7 +187,8 @@ class PlayerExperienceDeviceTest {
             assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.contentScroll).visibility)
             assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.playerTopBar).visibility)
             assertTrue(activity.findViewById<androidx.media3.ui.PlayerView>(R.id.playerView).useController)
-            assertSame(session, controller.activeSession)
+            // activeSession is a value snapshot, reconstructed on every read.
+            assertEquals(session, controller.activeSession)
         }
     }
 

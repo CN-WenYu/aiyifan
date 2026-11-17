@@ -241,6 +241,8 @@ class PlaybackDeviceTest {
             val saved = AppGraph.catalogRepository.getHistory().first { it.mediaKey == detail.mediaKey }
             assertEquals(second.episodeKey, saved.episodeKey)
             assertTrue(saved.progressMs >= 7_000L)
+            // Waking the device returns before keyguard dismissal has completed.
+            await { com.aiyifan.app.core.ui.ScreenOffPlaybackObserver.canPlay(context) }
             scenario.onActivity { controller.togglePlayPause() }
             await { controller.isPlaying }
             scenario.onActivity { it.findViewById<ImageButton>(R.id.fullScreenBackButton).performClick() }

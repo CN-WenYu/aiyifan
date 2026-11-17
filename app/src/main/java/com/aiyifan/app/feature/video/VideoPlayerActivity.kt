@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.ResultReceiver
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Rational
@@ -21,6 +24,7 @@ import android.widget.LinearLayout
 import android.widget.ImageButton
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
@@ -71,6 +75,13 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var playbackJob: Job? = null
     private var detailJob: Job? = null
     private var overlayHandoffPending = false
+    private var openingOverlaySettings = false
+    private var overlayRequestId = 0L
+    private var pendingOverlayStart: Intent? = null
+    private val overlayPermissionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        // Granting permission never starts playback or opens a window by itself.
+        openingOverlaySettings = false
+    }
     private var playerBrightness = -1f
     private var sleepTimerDialog: androidx.appcompat.app.AlertDialog? = null
     private var restorePipLayout: (() -> Unit)? = null
@@ -175,7 +186,6 @@ class VideoPlayerActivity : AppCompatActivity() {
             playbackController.activeSession == null && !playbackController.isLoading
         playbackController.openVideo(mediaKey, offlineDownloadId)
         playbackSelectionToken = playbackController.selectionToken
-        overlayHandoffPending = false
         window.attributes = window.attributes.apply { screenBrightness = playerBrightness }
         registerPositionListener()
         removeStateListener = playbackController.addStateListener {
@@ -218,6 +228,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        cancelPendingOverlayStart()
         resetFullscreenLock()
         setIntent(intent)
         detailJob?.cancel()
@@ -540,20 +551,16 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (overlayHandoffPending || playbackController.hasOverlayOwner) return
+        if (openingOverlaySettings || overlayHandoffPending || playbackController.hasOverlayOwner) return
         if (!ScreenOffPlaybackObserver.canPlay(this)) return
         when (currentDestination()) {
             PlaybackDestination.PICTURE_IN_PICTURE -> {
                 if (!enterSystemPictureInPicture()) {
-                    if (Settings.canDrawOverlays(this)) {
-                        startOverlayPlayer()
-                    } else {
-                        showInAppMiniPlayer()
-                    }
+                    showInAppMiniPlayer()
                 }
             }
 
-            PlaybackDestination.OVERLAY -> startOverlayPlayer()
+            PlaybackDestination.OVERLAY,
             PlaybackDestination.IN_APP_MINI_PLAYER,
             PlaybackDestination.NONE,
             -> Unit
@@ -636,15 +643,23 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun showFloatingPresentation() {
+        if (overlayHandoffPending || openingOverlaySettings) return
+        if (!ownsPlaybackSelection() || !playbackController.isPrepared || playbackController.hasPlaybackError) {
+            Toast.makeText(this, R.string.floating_player_not_ready, Toast.LENGTH_SHORT).show()
+            return
+        }
         if (Settings.canDrawOverlays(this)) {
             startOverlayPlayer()
         } else {
-            startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName"),
-                ),
-            )
+            openingOverlaySettings = true
+            try {
+                overlayPermissionLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
+                )
+            } catch (_: RuntimeException) {
+                openingOverlaySettings = false
+                Toast.makeText(this, R.string.floating_player_permission_unavailable, Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -652,8 +667,58 @@ class VideoPlayerActivity : AppCompatActivity() {
         if (!Settings.canDrawOverlays(this)) return
         resetFullscreenLock()
         overlayHandoffPending = true
-        ContextCompat.startForegroundService(this, FloatingPlayerService.intent(this))
-        moveTaskToBack(true)
+        val requestId = ++overlayRequestId
+        val requestedController = playbackController
+        val token = playbackSelectionToken
+        val handler = Handler(Looper.getMainLooper())
+        lateinit var request: Intent
+        fun complete(success: Boolean) {
+            if (requestId != overlayRequestId || !overlayHandoffPending) return
+            overlayHandoffPending = false
+            pendingOverlayStart = null
+            if (!FloatingPlayerService.clearStartRequest(request)) return
+            if (requestedController !== playbackController || token != playbackController.selectionToken) return
+            if (success && !isFinishing && !isDestroyed && playbackController.hasOverlayOwner) {
+                // Only leave after the window has actually acquired the existing player.
+                moveTaskToBack(true)
+            } else {
+                playbackController.hasOverlayOwner = false
+                stopService(FloatingPlayerService.intent(this))
+                if (!isFinishing && !isDestroyed && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                    attachPlayerToCurrentSurface()
+                    Toast.makeText(this, R.string.floating_player_start_failed, Toast.LENGTH_LONG).show()
+                } else {
+                    playbackController.pause()
+                }
+            }
+        }
+        val timeout = Runnable { complete(false) }
+        val receiver = object : ResultReceiver(handler) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                handler.removeCallbacks(timeout)
+                complete(resultCode == FloatingPlayerService.RESULT_STARTED)
+            }
+        }
+        request = FloatingPlayerService.startIntent(this, token, receiver)
+        pendingOverlayStart = request
+        handler.postDelayed(timeout, 5_000L)
+        try {
+            ContextCompat.startForegroundService(this, request)
+        } catch (_: RuntimeException) {
+            handler.removeCallbacks(timeout)
+            complete(false)
+        }
+    }
+
+    private fun cancelPendingOverlayStart() {
+        val request = pendingOverlayStart ?: return
+        pendingOverlayStart = null
+        overlayHandoffPending = false
+        overlayRequestId++
+        if (FloatingPlayerService.clearStartRequest(request)) {
+            playbackController.hasOverlayOwner = false
+            stopService(FloatingPlayerService.intent(this))
+        }
     }
 
     private fun showInAppMiniPlayer() {
@@ -736,6 +801,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
     override fun onStop() {
+        cancelPendingOverlayStart()
         resetFullscreenLock()
         sleepTimerDialog?.dismiss()
         sleepTimerDialog = null
@@ -758,6 +824,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        cancelPendingOverlayStart()
         playbackJob?.cancel()
         detailJob?.cancel()
         resetFullscreenLock()
