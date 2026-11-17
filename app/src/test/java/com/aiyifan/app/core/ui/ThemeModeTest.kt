@@ -7,8 +7,8 @@ import org.junit.Test
 class ThemeModeTest {
 
     @Test
-    fun `unknown stored value falls back to following system`() {
-        assertEquals(ThemeMode.SYSTEM, ThemeMode.fromStorageValue("legacy"))
+    fun `unknown stored value falls back to dark`() {
+        assertEquals(ThemeMode.DARK, ThemeMode.fromStorageValue("legacy"))
     }
 
     @Test

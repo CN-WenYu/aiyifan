@@ -18,11 +18,17 @@
 
             <androidx.media3.ui.PlayerView android:id="@+id/playerView" android:layout_width="match_parent" android:layout_height="match_parent" app:show_buffering="when_playing" app:use_controller="true" app:controller_layout_id="@layout/view_video_controls" />
 
+            <FrameLayout android:id="@+id/fullScreenLockOverlay" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@android:color/transparent" android:clickable="true" android:focusable="true" android:contentDescription="@string/player_locked_hint" android:visibility="gone">
+                <ImageButton android:id="@+id/fullScreenUnlockButton" android:layout_width="@dimen/dp_64" android:layout_height="@dimen/dp_64" android:layout_gravity="center" android:background="@drawable/bg_floating_control" android:contentDescription="@string/player_unlock_screen" android:padding="@dimen/dp_16" android:src="@drawable/ic_lock_open" android:visibility="gone" app:tint="@android:color/white" />
+            </FrameLayout>
+
             <LinearLayout android:id="@+id/fullScreenTitleBar" android:layout_width="match_parent" android:layout_height="@dimen/dp_48" android:layout_gravity="top" android:background="#99000000" android:gravity="center_vertical" android:orientation="horizontal" android:visibility="gone">
 
                 <ImageButton android:id="@+id/fullScreenBackButton" android:layout_width="@dimen/dp_48" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="@string/hardcoded_text_001" android:padding="@dimen/dp_12" android:src="@drawable/ic_back" app:tint="@android:color/white" />
 
                 <TextView android:id="@+id/fullScreenVideoTitle" android:layout_width="@dimen/dp_0" android:layout_height="wrap_content" android:layout_marginEnd="@dimen/dp_16" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:textColor="@android:color/white" android:textSize="@dimen/sp_16" />
+
+                <ImageButton android:id="@+id/fullScreenLockButton" android:layout_width="@dimen/dp_48" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="@string/player_lock_screen" android:padding="@dimen/dp_12" android:src="@drawable/ic_lock" app:tint="@android:color/white" />
             </LinearLayout>
 
         </FrameLayout>

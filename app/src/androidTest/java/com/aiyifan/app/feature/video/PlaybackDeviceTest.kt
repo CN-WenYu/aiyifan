@@ -34,6 +34,141 @@ class PlaybackDeviceTest {
     private var historyBefore: String? = null
     private var localBefore: String? = null
 
+    @Test
+    fun onlineFullscreenLockKeepsPlayingAndUnlocks() {
+        val clip = File(context.cacheDir, "fullscreen-lock-test.mp4")
+        instrumentation.context.assets.open("playback-test.mp4").use { input -> clip.outputStream().use(input::copyTo) }
+        val episode = Episode("qa-lock-first", "1", 1, clip.toURI().toString())
+        val detail = VideoDetail("qa-fullscreen-lock", "全屏锁定验证", "", 2, episodes = listOf(episode))
+        mainValue {
+            AppGraph.videoPlaybackController.release()
+            AppGraph.videoPlaybackController.apply {
+                openVideo(detail.mediaKey)
+                prepare(detail, episode)
+            }
+        }
+        try {
+            ActivityScenario.launch<VideoPlayerActivity>(VideoPlayerActivity.intent(context, detail.mediaKey)).use { scenario ->
+                lateinit var activity: VideoPlayerActivity
+                scenario.onActivity { activity = it }
+                exerciseFullscreenLock(activity, false)
+            }
+        } finally {
+            clip.delete()
+        }
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 29)
+    fun localFullscreenLockKeepsPlayingAndUnlocks() {
+        val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, "aiyifan-fullscreen-lock-test.mp4")
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        })!!
+        try {
+            instrumentation.context.assets.open("playback-test.mp4").use { input ->
+                context.contentResolver.openOutputStream(uri)!!.use(input::copyTo)
+            }
+            context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+            val video = LocalVideo(uri.lastPathSegment!!.toLong(), uri.toString(), "全屏锁定验证", 20_000L, 0L, 0L, null)
+            ActivityScenario.launch<LocalVideoPlayerActivity>(LocalVideoPlayerActivity.intent(context, video)).use { scenario ->
+                lateinit var activity: LocalVideoPlayerActivity
+                scenario.onActivity { activity = it }
+                exerciseFullscreenLock(activity, true)
+            }
+        } finally {
+            context.contentResolver.delete(uri, null, null)
+        }
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun exerciseFullscreenLock(activity: androidx.appcompat.app.AppCompatActivity, local: Boolean) {
+        val playerView = mainValue { activity.findViewById<PlayerView>(if (local) R.id.localPlayerView else R.id.playerView) }
+        val player = mainValue { playerView.player!! }
+        val lock = mainValue { activity.findViewById<android.view.View>(if (local) R.id.localFullScreenLockButton else R.id.fullScreenLockButton) }
+        val overlay = mainValue { activity.findViewById<android.view.View>(if (local) R.id.localLockOverlay else R.id.fullScreenLockOverlay) }
+        val unlock = mainValue { activity.findViewById<android.view.View>(if (local) R.id.localUnlockButton else R.id.fullScreenUnlockButton) }
+        await { player.isPlaying }
+        mainValue { activity.findViewById<android.view.View>(if (local) R.id.localFullScreenButton else R.id.fullScreenButton).performClick() }
+        await { activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE }
+        // Configuration updates before the system finishes the rotation animation.
+        SystemClock.sleep(700L)
+        mainValue { playerView.showController() }
+        instrumentation.waitForIdleSync()
+        lockScreenshot(if (local) "local-controls" else "online-controls")
+        tapView(lock)
+        await { overlay.visibility == android.view.View.VISIBLE }
+        val position = mainValue {
+            assertFalse(playerView.useController)
+            assertEquals(android.view.View.GONE, unlock.visibility)
+            player.currentPosition
+        }
+        SystemClock.sleep(600L)
+        mainValue {
+            assertTrue(player.isPlaying)
+            assertTrue("Playback continues under the touch lock", player.currentPosition > position)
+        }
+        tapView(overlay)
+        await { unlock.visibility == android.view.View.VISIBLE }
+        await { unlock.visibility == android.view.View.GONE }
+        mainValue {
+            assertEquals(android.view.View.VISIBLE, overlay.visibility)
+            assertFalse(playerView.useController)
+        }
+        repeat(3) {
+            tapView(overlay, 0.25f)
+            await { unlock.visibility == android.view.View.VISIBLE }
+            tapView(overlay, 0.25f)
+            await { unlock.visibility == android.view.View.GONE }
+        }
+        tapView(overlay)
+        await { unlock.visibility == android.view.View.VISIBLE }
+        lockScreenshot(if (local) "local-unlock" else "online-unlock")
+        tapView(unlock)
+        await { overlay.visibility == android.view.View.GONE }
+        mainValue { assertTrue(playerView.useController) }
+        tapView(lock)
+        await { overlay.visibility == android.view.View.VISIBLE }
+        shell("input keyevent KEYCODE_BACK")
+        await { activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT }
+        SystemClock.sleep(700L)
+        mainValue {
+            assertFalse(activity.isFinishing)
+            assertEquals(android.view.View.GONE, overlay.visibility)
+            assertTrue(playerView.useController)
+        }
+    }
+
+    private fun tapView(view: android.view.View, xFraction: Float = 0.5f) {
+        val point = mainValue {
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            (location[0] + view.width * xFraction) to (location[1] + view.height / 2f)
+        }
+        val now = SystemClock.uptimeMillis()
+        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+            MotionEvent.obtain(now, SystemClock.uptimeMillis(), action, point.first, point.second, 0).also {
+                it.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                instrumentation.sendPointerSync(it)
+                it.recycle()
+            }
+        }
+        instrumentation.waitForIdleSync()
+    }
+
+    private fun lockScreenshot(name: String) {
+        instrumentation.waitForIdleSync()
+        SystemClock.sleep(300L)
+        val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: error("Screenshot unavailable")
+        val file = File(context.getExternalFilesDir(null), "fullscreen-lock-$name.png")
+        file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        shell("mkdir -p /data/local/tmp/aiyifan-lock-qa")
+        shell("cp ${file.absolutePath} /data/local/tmp/aiyifan-lock-qa/${file.name}")
+        file.delete()
+    }
+
     @Before fun preserveHistory() {
         historyBefore = context.getSharedPreferences("watch_history", Context.MODE_PRIVATE).getString("watch_history", null)
         localBefore = context.getSharedPreferences("local_media_playback", Context.MODE_PRIVATE).getString("records", null)

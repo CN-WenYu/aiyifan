@@ -6,8 +6,12 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
 import android.view.View
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -15,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.aiyifan.app.R
 import com.aiyifan.app.core.ui.applySystemBarsPadding
+import com.aiyifan.app.core.ui.FullscreenLockState
 import com.aiyifan.app.core.ui.PlaybackScreenAwakeController
 import com.aiyifan.app.core.ui.ScreenOffPlaybackObserver
 import com.aiyifan.app.core.ui.setupEdgeToEdge
@@ -31,14 +36,21 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
     private var isFullScreen = false
     private var finishedPlayback = false
     private var screenObserver: ScreenOffPlaybackObserver? = null
+    private val fullscreenLockState = FullscreenLockState()
+    private val unlockPromptHideRunnable = Runnable {
+        fullscreenLockState.hideUnlockPrompt()
+        renderFullscreenLock()
+    }
+    private var isPlayerControllerVisible = true
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setupEdgeToEdge()
         binding = ActivityLocalVideoPlayerBinding.inflate(layoutInflater)
         setContentView(binding.root)
         screenAwakeController = PlaybackScreenAwakeController(binding.localPlayerView::setKeepScreenOn)
-        binding.localPlayerTopBar.applySystemBarsPadding(top = true, growHeight = true)
+        binding.localPlayerTopBar.applySystemBarsPadding(top = true, left = true, right = true, growHeight = true)
 
         playbackStore = LocalPlaybackStore(this)
         val parsed = parseVideo(intent)
@@ -65,6 +77,31 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
         binding.localVideoTitle.text = parsed.displayName
         binding.localBackButton.setOnClickListener { finish() }
         binding.localFullScreenButton.setOnClickListener { setFullScreen(!isFullScreen) }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (isFullScreen) setFullScreen(false) else finish()
+            }
+        })
+        binding.localFullScreenLockButton.setOnClickListener {
+            if (!isFullScreen || isInPictureInPictureMode) return@setOnClickListener
+            fullscreenLockState.lock()
+            renderFullscreenLock()
+        }
+        binding.localLockOverlay.setOnClickListener {
+            binding.root.removeCallbacks(unlockPromptHideRunnable)
+            if (fullscreenLockState.value == FullscreenLockState.Value.UNLOCK_PROMPT) {
+                fullscreenLockState.hideUnlockPrompt()
+            } else {
+                fullscreenLockState.revealUnlockPrompt()
+                binding.root.postDelayed(unlockPromptHideRunnable, FullscreenLockState.UNLOCK_PROMPT_TIMEOUT_MS)
+            }
+            renderFullscreenLock()
+        }
+        binding.localUnlockButton.setOnClickListener {
+            fullscreenLockState.unlock()
+            renderFullscreenLock()
+            binding.localPlayerView.showController()
+        }
         binding.localSpeedButton.setOnClickListener { showSpeedDialog() }
 
         player.addListener(object : Player.Listener {
@@ -81,12 +118,14 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
                 if (playbackState == Player.STATE_ENDED) {
                     screenAwakeController.onIsPlayingChanged(false)
                     finishedPlayback = true
+                    resetFullscreenLock()
                     persistPosition(0L)
                 }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 screenAwakeController.onIsPlayingChanged(false)
+                resetFullscreenLock()
                 persistPosition(player.currentPosition)
                 finish()
             }
@@ -95,19 +134,22 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
 
         binding.localPlayerView.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { visible ->
-                binding.localPlayerTopBar.isVisible = visible == View.VISIBLE
+                isPlayerControllerVisible = visible == View.VISIBLE
+                renderFullscreenLock()
             },
         )
+        setFullScreen(resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            isFullScreen = true
+        if (newConfig.orientation != Configuration.ORIENTATION_UNDEFINED) {
+            setFullScreen(newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE)
         }
     }
 
     override fun onStop() {
+        resetFullscreenLock()
         if (::player.isInitialized) player.pause()
         if (::player.isInitialized && !finishedPlayback) {
             persistPosition(player.currentPosition)
@@ -116,6 +158,7 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        resetFullscreenLock()
         screenObserver?.release()
         if (::screenAwakeController.isInitialized) {
             screenAwakeController.detach()
@@ -129,12 +172,48 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
 
     private fun setFullScreen(fullScreen: Boolean) {
         isFullScreen = fullScreen
+        if (!fullScreen) resetFullscreenLock()
         requestedOrientation = if (fullScreen) {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         } else {
             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
-        binding.localPlayerTopBar.applySystemBarsPadding(top = true, growHeight = true)
+        WindowCompat.getInsetsController(window, binding.root).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (fullScreen) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
+        }
+        renderFullscreenLock()
+    }
+
+    private fun resetFullscreenLock() {
+        binding.root.removeCallbacks(unlockPromptHideRunnable)
+        if (fullscreenLockState.value == FullscreenLockState.Value.UNLOCKED) return
+        fullscreenLockState.reset()
+        renderFullscreenLock()
+    }
+
+    private fun renderFullscreenLock() {
+        val locked = fullscreenLockState.value != FullscreenLockState.Value.UNLOCKED
+        val unlockPromptVisible = fullscreenLockState.value == FullscreenLockState.Value.UNLOCK_PROMPT
+        binding.localLockOverlay.isVisible = isFullScreen && locked
+        binding.localUnlockButton.isVisible = isFullScreen && unlockPromptVisible
+        if (!binding.localUnlockButton.isVisible) binding.root.removeCallbacks(unlockPromptHideRunnable)
+        val useController = !locked && !isInPictureInPictureMode
+        if (binding.localPlayerView.useController != useController) binding.localPlayerView.useController = useController
+        binding.localPlayerView.importantForAccessibility = if (locked) {
+            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        } else {
+            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        }
+        binding.localPlayerTopBar.isVisible = isPlayerControllerVisible && !locked && !isInPictureInPictureMode
+        binding.localFullScreenLockButton.isVisible = isFullScreen && isPlayerControllerVisible && !locked && !isInPictureInPictureMode
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+        resetFullscreenLock()
+        binding.localPlayerView.useController = !isInPictureInPictureMode
+        if (isInPictureInPictureMode) binding.localPlayerTopBar.isVisible = false
     }
 
     private fun showSpeedDialog() {

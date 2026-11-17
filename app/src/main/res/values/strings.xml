@@ -18,6 +18,9 @@
     <string name="player_episode_title">%1$s · 第 %2$d 集</string>
     <string name="player_rewind_ten_seconds">快退 10s</string>
     <string name="player_forward_ten_seconds">快进 10s</string>
+    <string name="player_lock_screen">锁定屏幕</string>
+    <string name="player_unlock_screen">解锁屏幕</string>
+    <string name="player_locked_hint">屏幕已锁定，点击显示解锁按钮</string>
     <string name="video_no_playable_stream">暂无可播放视频</string>
     <string name="auto_skip_intro_outro">自动跳过片头片尾</string>
     <string name="auto_skip_intro">已为您跳过片头</string>

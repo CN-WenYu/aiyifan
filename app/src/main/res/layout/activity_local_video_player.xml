@@ -12,6 +12,29 @@
         app:show_timeout="3000"
         app:use_artwork="false" />
 
+    <FrameLayout
+        android:id="@+id/localLockOverlay"
+        android:contentDescription="@string/player_locked_hint"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <ImageButton
+            android:id="@+id/localUnlockButton"
+            android:layout_width="@dimen/dp_64"
+            android:layout_height="@dimen/dp_64"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_floating_control"
+            android:contentDescription="@string/player_unlock_screen"
+            android:padding="@dimen/dp_16"
+            android:src="@drawable/ic_lock_open"
+            android:visibility="gone"
+            app:tint="@android:color/white" />
+    </FrameLayout>
+
     <LinearLayout
         android:id="@+id/localPlayerTopBar"
         android:layout_width="match_parent"
@@ -60,5 +83,16 @@
             android:contentDescription="@string/hardcoded_text_023"
             android:src="@drawable/ic_fullscreen"
             android:padding="@dimen/dp_16" />
+
+        <ImageButton
+            android:id="@+id/localFullScreenLockButton"
+            app:tint="@color/text_primary"
+            android:layout_width="@dimen/dp_56"
+            android:layout_height="match_parent"
+            android:background="@android:color/transparent"
+            android:contentDescription="@string/player_lock_screen"
+            android:src="@drawable/ic_lock"
+            android:padding="@dimen/dp_16"
+            android:visibility="gone" />
     </LinearLayout>
 </FrameLayout>

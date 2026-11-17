@@ -17,6 +17,20 @@ import org.junit.Test
 class VideoPlaybackControllerTest {
 
     @Test
+    fun `online playback errors are observable by presentation listeners`() {
+        val engine = FakePlaybackEngine()
+        val controller = VideoPlaybackController(engine, FakeCatalogRepository(), FakePlaybackSession())
+        val errors = mutableListOf<Boolean>()
+        controller.addStateListener { errors += controller.hasPlaybackError }
+        engine.hasPlaybackError = true
+        engine.dispatchState()
+        assertTrue(errors.last())
+        engine.hasPlaybackError = false
+        engine.dispatchState()
+        assertFalse(errors.last())
+    }
+
+    @Test
     fun `pending selection survives callbacks and rolls back on failure`() = runBlocking {
         val first = sampleEpisode(key = "first")
         val second = sampleEpisode(key = "second")
@@ -670,6 +684,7 @@ class VideoPlaybackControllerTest {
         override var currentPosition: Long = 0L,
         override var duration: Long = 0L,
     ) : PlaybackEngine {
+        override var hasPlaybackError = false
         override var hasEnded = false
         override var isPlaying = false
         override var playWhenReady = false

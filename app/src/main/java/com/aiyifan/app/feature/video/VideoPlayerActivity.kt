@@ -40,6 +40,7 @@ import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.ui.CommentAdapter
 import com.aiyifan.app.core.ui.EpisodeAdapter
+import com.aiyifan.app.core.ui.FullscreenLockState
 import com.aiyifan.app.core.ui.VideoListAdapter
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.setupEdgeToEdge
@@ -73,6 +74,11 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var playerBrightness = -1f
     private var sleepTimerDialog: androidx.appcompat.app.AlertDialog? = null
     private var restorePipLayout: (() -> Unit)? = null
+    private val fullscreenLockState = FullscreenLockState()
+    private val unlockPromptHideRunnable = Runnable {
+        fullscreenLockState.hideUnlockPrompt()
+        renderFullscreenLock()
+    }
     private val gestureFeedbackHideRunnable = Runnable { binding.playerGestureFeedback.isVisible = false }
 
     @UnstableApi
@@ -94,6 +100,26 @@ class VideoPlayerActivity : AppCompatActivity() {
         binding.backButton.setOnClickListener { handleBack() }
         binding.fullScreenButton.setOnClickListener { setFullScreen(!isFullScreen) }
         binding.fullScreenBackButton.setOnClickListener { setFullScreen(false) }
+        binding.fullScreenLockButton.setOnClickListener {
+            if (!isFullScreen || restorePipLayout != null) return@setOnClickListener
+            fullscreenLockState.lock()
+            renderFullscreenLock()
+        }
+        binding.fullScreenLockOverlay.setOnClickListener {
+            binding.root.removeCallbacks(unlockPromptHideRunnable)
+            if (fullscreenLockState.value == FullscreenLockState.Value.UNLOCK_PROMPT) {
+                fullscreenLockState.hideUnlockPrompt()
+            } else {
+                fullscreenLockState.revealUnlockPrompt()
+                binding.root.postDelayed(unlockPromptHideRunnable, FullscreenLockState.UNLOCK_PROMPT_TIMEOUT_MS)
+            }
+            renderFullscreenLock()
+        }
+        binding.fullScreenUnlockButton.setOnClickListener {
+            fullscreenLockState.unlock()
+            renderFullscreenLock()
+            binding.playerView.showController()
+        }
         binding.playerView.setControllerVisibilityListener(
             PlayerView.ControllerVisibilityListener { controllerVisibility ->
                 this.controllerVisibility = controllerVisibility
@@ -160,6 +186,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                 return@addStateListener
             }
             showOfflinePlaybackError()
+            if (playbackController.hasPlaybackError) resetFullscreenLock()
             val timerLabel = SleepTimerDialog.label(this, playbackController.sleepTimerState)
             binding.playerView.findViewById<android.widget.TextView>(R.id.playerSleepTimerButton).text = timerLabel
             binding.inAppMiniSleepTimerButton.text = timerLabel
@@ -167,6 +194,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             updateEpisodeButtons()
             updateInAppMiniPlayPauseButton()
             if (playbackController.isPlaybackEnded) {
+                resetFullscreenLock()
                 lifecycleScope.launch {
                     handleEpisodeResult(playbackController.advanceToNextEpisodeIfEnded())
                 }
@@ -190,6 +218,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        resetFullscreenLock()
         setIntent(intent)
         detailJob?.cancel()
         playbackJob?.cancel()
@@ -389,6 +418,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                 if (!playbackController.hasOverlayOwner) attachPlayerToCurrentSurface()
             }
             EpisodeSwitchResult.Failed -> {
+                resetFullscreenLock()
                 if (playbackController.isOffline) showOfflinePlaybackError()
                 else Toast.makeText(this, R.string.video_stream_load_failed, Toast.LENGTH_SHORT).show()
             }
@@ -448,6 +478,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     private fun setFullScreen(enabled: Boolean) {
         isFullScreen = enabled
+        if (!enabled) resetFullscreenLock()
         requestedOrientation = if (enabled) {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         } else {
@@ -470,13 +501,41 @@ class VideoPlayerActivity : AppCompatActivity() {
             weight = if (enabled) 1f else 0f
             binding.playerContainer.layoutParams = this
         }
+        renderFullscreenLock()
+    }
+
+    private fun resetFullscreenLock() {
+        binding.root.removeCallbacks(unlockPromptHideRunnable)
+        if (fullscreenLockState.value == FullscreenLockState.Value.UNLOCKED) return
+        fullscreenLockState.reset()
+        renderFullscreenLock()
+    }
+
+    private fun renderFullscreenLock() {
+        val locked = fullscreenLockState.value != FullscreenLockState.Value.UNLOCKED
+        val unlockPromptVisible = fullscreenLockState.value == FullscreenLockState.Value.UNLOCK_PROMPT
+        binding.fullScreenLockOverlay.isVisible = isFullScreen && restorePipLayout == null && locked
+        binding.fullScreenUnlockButton.isVisible = isFullScreen && restorePipLayout == null && unlockPromptVisible
+        if (!binding.fullScreenUnlockButton.isVisible) binding.root.removeCallbacks(unlockPromptHideRunnable)
+        val useController = !locked && restorePipLayout == null
+        if (binding.playerView.useController != useController) binding.playerView.useController = useController
+        binding.playerView.importantForAccessibility = if (locked) {
+            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        } else {
+            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        }
+        if (locked) {
+            binding.playerGestureFeedback.isVisible = false
+            binding.root.removeCallbacks(gestureFeedbackHideRunnable)
+        }
+        updateFullScreenTitleBar()
     }
 
     private fun updateFullScreenTitleBar() {
         binding.fullScreenTitleBar.isVisible = FullScreenControlVisibility.shouldShowTitleBar(
             isFullScreen = isFullScreen,
             controllerVisibility = controllerVisibility,
-        ) && restorePipLayout == null
+        ) && restorePipLayout == null && fullscreenLockState.value == FullscreenLockState.Value.UNLOCKED
     }
 
     override fun onUserLeaveHint() {
@@ -509,6 +568,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     @androidx.annotation.OptIn(UnstableApi::class)
     private fun preparePictureInPictureLayout() {
         if (restorePipLayout != null) return
+        resetFullscreenLock()
         val hiddenViews = listOf(
             binding.playerTopBar,
             binding.contentScroll,
@@ -590,6 +650,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     private fun startOverlayPlayer() {
         if (!Settings.canDrawOverlays(this)) return
+        resetFullscreenLock()
         overlayHandoffPending = true
         ContextCompat.startForegroundService(this, FloatingPlayerService.intent(this))
         moveTaskToBack(true)
@@ -597,6 +658,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     private fun showInAppMiniPlayer() {
         if (!playbackController.isPrepared) return
+        resetFullscreenLock()
         isInAppMiniPlayerVisible = true
         binding.inAppMiniPlayer.isVisible = true
         binding.contentScroll.isVisible = false
@@ -674,6 +736,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
     override fun onStop() {
+        resetFullscreenLock()
         sleepTimerDialog?.dismiss()
         sleepTimerDialog = null
         unregisterPositionListener()
@@ -697,6 +760,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     override fun onDestroy() {
         playbackJob?.cancel()
         detailJob?.cancel()
+        resetFullscreenLock()
         unregisterPositionListener()
         removeStateListener?.invoke()
         binding.root.removeCallbacks(gestureFeedbackHideRunnable)

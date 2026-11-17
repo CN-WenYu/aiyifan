@@ -118,6 +118,7 @@ class VideoPlaybackController(
         private set
     val isOffline: Boolean get() = requestedOfflineDownloadId != null
     val hasOfflinePlaybackError: Boolean get() = isOffline && (offlineLoadFailed || engine.hasPlaybackError)
+    val hasPlaybackError: Boolean get() = !released && (engine.hasPlaybackError || hasOfflinePlaybackError)
 
     private var activeDetail: VideoDetail? = null
     private var activeEpisode: Episode? = null

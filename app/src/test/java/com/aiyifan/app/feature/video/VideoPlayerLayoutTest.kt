@@ -67,6 +67,17 @@ class VideoPlayerLayoutTest {
         assertEquals("@string/auto_skip_intro_outro", autoSkipSwitch!!.getAttribute("android:text"))
     }
 
+    @Test
+    fun `full screen player exposes lock controls and unlock overlay`() {
+        val document = videoPlayerLayout()
+        val playerContainer = viewWithId(document, "playerContainer")!!
+        val titleBar = viewWithId(playerContainer, "fullScreenTitleBar")!!
+        val lockOverlay = viewWithId(playerContainer, "fullScreenLockOverlay")!!
+
+        assertNotNull(viewWithId(titleBar, "fullScreenLockButton"))
+        assertEquals("fullScreenUnlockButton", viewWithId(lockOverlay, "fullScreenUnlockButton")!!.idName())
+    }
+
     private fun videoPlayerLayout() = DocumentBuilderFactory.newInstance()
         .newDocumentBuilder()
         .parse(layoutFile())
