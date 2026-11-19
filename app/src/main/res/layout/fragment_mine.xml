@@ -23,7 +23,6 @@
         </LinearLayout>
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginStart="@dimen/dp_20" android:layout_marginTop="@dimen/dp_24" android:layout_marginBottom="@dimen/dp_8" android:text="@string/mine_common_features" android:textColor="@color/text_secondary" android:textSize="@dimen/sp_13" />
         <LinearLayout android:id="@+id/contentGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginHorizontal="@dimen/dp_16" android:background="@drawable/bg_surface" android:orientation="vertical" android:paddingHorizontal="@dimen/dp_6" android:paddingVertical="@dimen/dp_6">
-            <LinearLayout android:id="@+id/downloadsButton" style="@style/MineActionRow" android:contentDescription="@string/downloads_title"><ImageView style="@style/MineActionIcon" android:importantForAccessibility="no" android:src="@drawable/ic_download" app:tint="@color/accent" /><LinearLayout style="@style/MineActionTextGroup"><TextView style="@style/MineActionTitle" android:text="@string/downloads_title" /><TextView style="@style/MineActionSubtitle" android:text="@string/downloads_subtitle" /></LinearLayout><ImageView style="@style/MineActionArrow" android:src="@drawable/ic_chevron_right" /></LinearLayout>
             <LinearLayout android:id="@+id/historyButton" style="@style/MineActionRow" android:contentDescription="@string/hardcoded_text_040"><ImageView style="@style/MineActionIcon" android:contentDescription="@string/hardcoded_text_039" android:src="@drawable/ic_history" /><LinearLayout style="@style/MineActionTextGroup"><TextView style="@style/MineActionTitle" android:text="@string/hardcoded_text_039" /><TextView style="@style/MineActionSubtitle" android:text="@string/mine_history_subtitle" /></LinearLayout><ImageView style="@style/MineActionArrow" android:contentDescription="@string/hardcoded_text_040" android:src="@drawable/ic_chevron_right" /></LinearLayout>
             <LinearLayout android:id="@+id/collectionButton" style="@style/MineActionRow" android:contentDescription="@string/hardcoded_text_042"><ImageView style="@style/MineActionIcon" android:contentDescription="@string/hardcoded_text_041" android:src="@drawable/ic_favorite" /><LinearLayout style="@style/MineActionTextGroup"><TextView style="@style/MineActionTitle" android:text="@string/hardcoded_text_041" /><TextView style="@style/MineActionSubtitle" android:text="@string/mine_favorite_subtitle" /></LinearLayout><ImageView style="@style/MineActionArrow" android:contentDescription="@string/hardcoded_text_042" android:src="@drawable/ic_chevron_right" /></LinearLayout>
             <LinearLayout android:id="@+id/hotButton" style="@style/MineActionRow" android:contentDescription="@string/tab_hot"><ImageView style="@style/MineActionIcon" android:contentDescription="@string/tab_hot" android:src="@drawable/ic_favorite" /><LinearLayout style="@style/MineActionTextGroup"><TextView style="@style/MineActionTitle" android:text="@string/tab_hot" /><TextView style="@style/MineActionSubtitle" android:text="@string/mine_hot_subtitle" /></LinearLayout><ImageView style="@style/MineActionArrow" android:contentDescription="@string/tab_hot" android:src="@drawable/ic_chevron_right" /></LinearLayout>
@@ -31,6 +30,31 @@
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginStart="@dimen/dp_20" android:layout_marginTop="@dimen/dp_24" android:layout_marginBottom="@dimen/dp_8" android:text="@string/hardcoded_text_043" android:textColor="@color/text_secondary" android:textSize="@dimen/sp_13" />
         <LinearLayout android:id="@+id/settingsGroup" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginHorizontal="@dimen/dp_16" android:background="@drawable/bg_surface" android:paddingHorizontal="@dimen/dp_8" android:paddingVertical="@dimen/dp_6"><LinearLayout android:id="@+id/themeSettingsButton" style="@style/MineActionRow" android:contentDescription="@string/enter_theme_settings" android:paddingHorizontal="@dimen/dp_12"><ImageView style="@style/MineActionIcon" android:contentDescription="@string/theme_settings_title" android:src="@drawable/ic_theme" /><LinearLayout style="@style/MineActionTextGroup"><TextView style="@style/MineActionTitle" android:text="@string/theme_settings_title" /><TextView android:id="@+id/themeSettingsSummary" style="@style/MineActionSubtitle" /></LinearLayout><ImageView style="@style/MineActionArrow" android:contentDescription="@string/enter_theme_settings" android:src="@drawable/ic_chevron_right" /></LinearLayout>
 
+        </LinearLayout>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/dp_20" android:layout_marginTop="@dimen/dp_24" android:layout_marginBottom="@dimen/dp_8"
+            android:text="@string/download_settings" android:textColor="@color/text_secondary" android:textSize="@dimen/sp_13" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginHorizontal="@dimen/dp_16" android:orientation="vertical" android:background="@drawable/bg_surface"
+            android:paddingHorizontal="@dimen/dp_8" android:paddingVertical="@dimen/dp_6">
+            <LinearLayout android:id="@+id/downloadCountRow" style="@style/MineActionRow">
+                <ImageView style="@style/MineActionIcon" android:src="@drawable/ic_grid"
+                    app:tint="@color/accent" android:importantForAccessibility="no" />
+                <TextView style="@style/MineActionTitle" android:layout_marginStart="@dimen/dp_12" android:layout_width="0dp" android:layout_weight="1"
+                    android:text="@string/download_parallel_title" />
+                <TextView android:id="@+id/downloadCountValue" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginEnd="@dimen/dp_8" android:textColor="@color/text_secondary" android:textSize="@dimen/sp_14" />
+                <ImageView style="@style/MineActionArrow" android:src="@drawable/ic_chevron_right" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:paddingStart="@dimen/dp_12" android:gravity="center_vertical">
+                <ImageView style="@style/MineActionIcon" android:src="@drawable/ic_mobile_data"
+                    android:importantForAccessibility="no" />
+                <androidx.appcompat.widget.SwitchCompat android:id="@+id/mobileDownloadSwitch" style="@style/MineActionRow"
+                    android:layout_width="0dp" android:layout_weight="1" android:text="@string/download_allow_mobile"
+                    android:textSize="@dimen/sp_16" android:textColor="@color/text_primary"
+                    android:saveEnabled="false" app:thumbTint="@color/download_choice_tint" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

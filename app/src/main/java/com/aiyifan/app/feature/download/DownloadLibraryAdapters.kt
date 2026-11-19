@@ -2,10 +2,11 @@ package com.aiyifan.app.feature.download
 
 import android.content.Context
 import android.text.format.Formatter
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.ImageView
-import android.widget.LinearLayout
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -19,11 +20,11 @@ import java.io.File
 
 internal data class DownloadRow(
     val id: String, val title: String, val subtitle: String, val status: String,
-    val size: String, val percent: Int?, val indeterminate: Boolean, val action: Int,
-    val enabled: Boolean, val canDelete: Boolean, val poster: File?,
+    val statusColor: Int, val size: String, val percent: Int?, val action: Int,
+    val enabled: Boolean, val canDelete: Boolean, val poster: File?, val editing: Boolean, val selected: Boolean,
 )
 
-internal class DownloadAdapter(private val action: (String) -> Unit, private val more: (String, android.view.View) -> Unit) :
+internal class DownloadAdapter(private val click: (String) -> Unit, private val longPress: (String) -> Unit) :
     ListAdapter<DownloadRow, DownloadAdapter.Holder>(object : DiffUtil.ItemCallback<DownloadRow>() {
         override fun areItemsTheSame(oldItem: DownloadRow, newItem: DownloadRow) = oldItem.id == newItem.id
         override fun areContentsTheSame(oldItem: DownloadRow, newItem: DownloadRow) = oldItem == newItem
@@ -36,30 +37,34 @@ internal class DownloadAdapter(private val action: (String) -> Unit, private val
         with(holder.binding) {
             title.text = row.title
             subtitle.text = row.subtitle
+            subtitle.isVisible = row.subtitle.isNotBlank()
+            separator.isVisible = subtitle.isVisible
             status.text = row.status
+            status.setTextColor(root.context.getColor(row.statusColor))
             size.text = row.size
-            // LinearProgressIndicator requires hiding before switching to indeterminate mode.
-            progress.hide()
-            progress.isIndeterminate = row.indeterminate
-            if (!row.indeterminate) progress.setProgressCompat(row.percent ?: 0, false)
-            progress.show()
-            actionButton.setText(row.action)
-            actionButton.isEnabled = row.enabled
-            deleteButton.isEnabled = row.canDelete
-            actionButton.setOnClickListener { action(row.id) }
-            deleteButton.setOnClickListener { more(row.id, it) }
+            size.isVisible = row.size.isNotEmpty()
+            progress.isVisible = row.percent != null
+            row.percent?.let { progress.setProgressCompat(it, false) }
+            selection.isVisible = row.editing
+            selection.isChecked = row.selected
+            root.isSelected = row.editing && row.selected
+            root.setOnClickListener { click(row.id) }
+            root.isClickable = if (row.editing) row.canDelete else row.enabled
+            root.setOnLongClickListener { longPress(row.id); true }
+            root.isLongClickable = row.canDelete
+            ViewCompat.replaceAccessibilityAction(root, AccessibilityActionCompat.ACTION_CLICK,
+                if (!row.editing && row.enabled) root.context.getString(row.action) else null, null)
             poster.loadLocalPoster(row.poster)
         }
     }
 }
 
-internal data class DownloadFilmRow(val film: DownloadFilm, val poster: File?)
+internal data class DownloadFilmRow(val film: DownloadFilm, val poster: File?, val editing: Boolean, val selected: Boolean)
 
 internal class DownloadFilmAdapter(
     private val play: (String) -> Unit,
-    private val episode: (String) -> Unit,
-    private val showAll: (String) -> Unit,
-    private val manage: (String) -> Unit,
+    private val click: (String) -> Unit,
+    private val longPress: (String) -> Unit,
 ) : ListAdapter<DownloadFilmRow, DownloadFilmAdapter.Holder>(object : DiffUtil.ItemCallback<DownloadFilmRow>() {
     override fun areItemsTheSame(oldItem: DownloadFilmRow, newItem: DownloadFilmRow) = oldItem.film.detail.mediaKey == newItem.film.detail.mediaKey
     override fun areContentsTheSame(oldItem: DownloadFilmRow, newItem: DownloadFilmRow) = oldItem == newItem
@@ -77,21 +82,17 @@ internal class DownloadFilmAdapter(
             meta.text = listOfNotNull(film.detail.typeName, film.detail.publishTime, film.detail.updateMsg)
                 .filter { it.isNotBlank() }.joinToString(" · ")
             meta.isVisible = meta.text.isNotEmpty()
-            credits.text = film.detail.actor?.takeIf { it.isNotBlank() }?.let { context.getString(R.string.download_library_credits, it) }
-            credits.isVisible = !credits.text.isNullOrEmpty()
             summary.text = context.getString(R.string.download_library_summary, film.completed.size, Formatter.formatShortFileSize(context, film.totalBytes))
             poster.loadLocalPoster(row.poster)
-            filmInfo.setOnClickListener { play(film.detail.mediaKey) }
+            selection.isVisible = row.editing
+            selection.isChecked = row.selected
+            root.isSelected = row.selected
+            root.setOnClickListener { click(film.detail.mediaKey) }
+            root.setOnLongClickListener { longPress(film.detail.mediaKey); true }
+            playButton.isVisible = !row.editing
+            playButton.setOnLongClickListener { longPress(film.detail.mediaKey); true }
+            playButton.contentDescription = context.getString(R.string.download_play_film, film.detail.title)
             playButton.setOnClickListener { play(film.detail.mediaKey) }
-            allButton.setOnClickListener { showAll(film.detail.mediaKey) }
-            manageButton.setOnClickListener { manage(film.detail.mediaKey) }
-            previews.removeAllViews()
-            film.episodes.take(6).forEach { item ->
-                val chip = ItemDownloadEpisodeBinding.inflate(LayoutInflater.from(context), previews, false)
-                chip.root.layoutParams = LinearLayout.LayoutParams(context.dp(72), context.dp(44)).apply { marginEnd = context.dp(4) }
-                bindLibraryEpisode(chip, item, managing = false, selected = false) { item.downloadId?.let(episode) }
-                previews.addView(chip.root)
-            }
         }
     }
 }

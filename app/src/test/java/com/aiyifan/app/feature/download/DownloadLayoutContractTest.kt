@@ -11,16 +11,13 @@ class DownloadLayoutContractTest {
     @Test
     fun `download rows use compact poster and action dimensions`() {
         val active = root(layout("item_download"))
-        assertEquals("56dp", view(active, "poster").getAttribute("android:layout_width"))
-        assertEquals("78dp", view(active, "poster").getAttribute("android:layout_height"))
-        assertEquals("8dp", active.getAttribute("android:padding"))
-        assertEquals("40dp", view(active, "actionButton").getAttribute("android:layout_height"))
+        assertEquals("48dp", view(active, "poster").getAttribute("android:layout_width"))
+        assertEquals("66dp", view(active, "poster").getAttribute("android:layout_height"))
 
         val completed = root(layout("item_download_film"))
-        assertEquals("72dp", view(completed, "poster").getAttribute("android:layout_width"))
-        assertEquals("96dp", view(completed, "poster").getAttribute("android:layout_height"))
-        assertEquals("48dp", view(completed, "previews").parentNode.attributes
-            .getNamedItem("android:layout_height").nodeValue)
+        assertEquals("62dp", view(completed, "poster").getAttribute("android:layout_width"))
+        assertEquals("82dp", view(completed, "poster").getAttribute("android:layout_height"))
+        assertEquals("48dp", view(completed, "playButton").getAttribute("android:layout_height"))
     }
 
     private fun layout(name: String): File = sequenceOf(

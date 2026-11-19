@@ -4,19 +4,9 @@ import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.model.WatchHistory
 
-internal data class DownloadProgressPresentation(
-    val percent: Int?,
-    val totalBytes: Long?,
-    val segmentBased: Boolean,
-    val indeterminate: Boolean,
-)
-
-internal fun downloadProgress(bytes: Long, length: Long, segmentPercent: Float, running: Boolean): DownloadProgressPresentation {
-    val total = length.takeIf { it > 0 }
-    val percent = if (total != null) ((bytes.coerceAtLeast(0).toDouble() / total) * 100).toInt().coerceIn(0, 100)
-        else segmentPercent.takeIf { it.isFinite() && it >= 0 }?.toInt()?.coerceIn(0, 100)
-    return DownloadProgressPresentation(percent, total, total == null && percent != null, running && percent == null)
-}
+internal fun downloadPercent(bytes: Long, length: Long, segmentPercent: Float): Int? =
+    if (length > 0) ((bytes.coerceAtLeast(0).toDouble() / length) * 100).toInt().coerceIn(0, 100)
+    else segmentPercent.takeIf { it.isFinite() && it >= 0 }?.toInt()?.coerceIn(0, 100)
 
 internal enum class LibraryEpisodeState {
     DOWNLOADED, NOT_DOWNLOADED, DOWNLOADING, WAITING_WIFI, WAITING_NETWORK, QUEUED, PAUSED, FAILED, REMOVING, PREPARING,

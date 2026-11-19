@@ -17,6 +17,8 @@ import com.aiyifan.app.core.download.OfflineDownloadRepository
 import com.aiyifan.app.core.download.downloadId
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
+import com.aiyifan.app.feature.main.MainActivity
+import com.google.android.material.tabs.TabLayout
 import com.aiyifan.app.feature.video.VideoPlayerActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -184,6 +186,12 @@ class OfflineDownloadDeviceTest {
                 android.util.Log.i("OfflineFixture", "Enqueued $path")
                 ids += id
                 await { repository.get(id)?.download?.state == Download.STATE_COMPLETED }
+                val completed = requireNotNull(repository.get(id))
+                when (path) {
+                    "/playback-test.mp4" -> assertEquals(completed.bytesDownloaded, completed.download.contentLength)
+                    "/download/master.m3u8" -> assertTrue((completed.metadata?.estimatedTotalBytes ?: 0) > 0)
+                    "/download/aes/index.m3u8" -> assertNull(completed.metadata?.estimatedTotalBytes)
+                }
                 android.util.Log.i("OfflineFixture", "Completed $path")
                 val countBeforeDuplicate = server.requests.size
                 assertEquals(id, withContext(Dispatchers.Main) { repository.enqueue(detail, episode) })
@@ -214,12 +222,12 @@ class OfflineDownloadDeviceTest {
                 }
             }
             assertEquals("Offline playback must not make HTTP requests", requestsBeforeOffline, server.requests.size)
-            ActivityScenario.launch(DownloadsActivity::class.java).use { scenario ->
-                scenario.onActivity { it.findViewById<com.google.android.material.tabs.TabLayout>(com.aiyifan.app.R.id.tabs).getTabAt(1)?.select() }
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_DOWNLOADS)!!.select() }
                 await {
                     var rendered = false
                     scenario.onActivity {
-                        val list = it.findViewById<androidx.recyclerview.widget.RecyclerView>(com.aiyifan.app.R.id.recycler)
+                        val list = it.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.films)
                         val expectedFilms = AppGraph.downloadRepository.tasks.value
                             .filter { it.download.state == Download.STATE_COMPLETED }
                             .mapNotNull { it.metadata?.detail?.mediaKey }.distinct().size
@@ -227,7 +235,6 @@ class OfflineDownloadDeviceTest {
                     }
                     rendered
                 }
-                delay(350) // Finish the tab indicator and RecyclerView item animations before visual QA.
                 instrumentation.waitForIdleSync()
                 screenshot("downloads-completed.png")
             }
@@ -243,7 +250,7 @@ class OfflineDownloadDeviceTest {
     }
 
     @Test
-    fun batchButtonsPauseAndResumeMixedQueueAcrossRecreation() = runBlocking<Unit> {
+    fun queueControlsEditSelectAndStartAcrossRecreation() = runBlocking<Unit> {
         // Hold source preparation so queued tasks cannot finish before the UI is exercised.
         val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
         val repository = withContext(Dispatchers.Main) {
@@ -255,44 +262,93 @@ class OfflineDownloadDeviceTest {
             })
         }
         val episodes = (1..4).map { Episode("batch-$it", "第 $it 集", it, null) }
-        val detail = VideoDetail("batch-fixture", "批量任务", "", 1, episodes = episodes)
+        val detail = VideoDetail("batch-fixture", "星夜来信：写给每一个在漫长旅途中等待重逢的人", "", 1, episodes = episodes)
         val ids = episodes.map { downloadId(detail.mediaKey, it.episodeKey) }
         withContext(Dispatchers.Main) { repository.awaitLoaded() }
         org.junit.Assume.assumeTrue("Batch controls require an isolated queue", repository.tasks.value.isEmpty())
+        val previousNetwork = repository.mobileDataAllowed
+        val previousParallel = withContext(Dispatchers.Main) { repository.parallelDownloads }
         try {
             withContext(Dispatchers.Main) {
+                repository.setMobileDataAllowed(true)
                 episodes.forEach { repository.enqueue(detail, it) }
-                repository.pause(ids.last())
+                ids.forEach { repository.pause(it) }
             }
-            await { repository.get(ids.last())?.download?.state == Download.STATE_STOPPED }
+            await { ids.all { repository.get(it)?.download?.stopReason == OfflineDownloadRepository.STOP_REASON_USER } }
             ActivityScenario.launch(DownloadsActivity::class.java).use { scenario ->
                 withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
+                scenario.onActivity { it.findViewById<View>(R.id.parallelButton).performClick() }
+                clickDialogChoice("3 个")
                 scenario.onActivity {
-                    val tabs = it.findViewById<com.google.android.material.tabs.TabLayout>(R.id.tabs)
-                    tabs.getTabAt(1)!!.select()
-                    assertFalse(it.findViewById<View>(R.id.batchActions).isShown)
-                    tabs.getTabAt(0)!!.select()
-                    assertTrue(it.findViewById<View>(R.id.batchActions).isShown)
-                    assertTrue(it.findViewById<View>(R.id.resumeAllButton).isEnabled)
-                    assertTrue(it.findViewById<View>(R.id.pauseAllButton).performClick())
+                    assertEquals(3, repository.manager.maxParallelDownloads)
+                    it.findViewById<View>(R.id.startAllButton).performClick()
                 }
+                await { ids.all { repository.get(it)?.download?.stopReason == Download.STOP_REASON_NONE } }
+                suspend fun awaitBatchLabel(label: Int) = await {
+                    var matches = false
+                    scenario.onActivity {
+                        val button = it.findViewById<android.widget.Button>(R.id.startAllButton)
+                        matches = button.isEnabled && button.text == it.getString(label)
+                    }
+                    matches
+                }
+                awaitBatchLabel(R.string.download_pause_all)
+                suspend fun verifyEpisodeFits() = await {
+                    var verified = false
+                    scenario.onActivity { activity ->
+                        val list = activity.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recycler)
+                        val first = list.getChildAt(0) ?: return@onActivity
+                        val title = first.findViewById<android.widget.TextView>(R.id.title)
+                        val episode = first.findViewById<android.widget.TextView>(R.id.subtitle)
+                        val statuses = (0 until list.childCount).map { list.getChildAt(it).findViewById<android.widget.TextView>(R.id.status) }
+                        verified = title.layout?.getEllipsisCount(0)?.let { it > 0 } == true &&
+                            episode.width > 0 && episode.layout?.getEllipsisCount(0) == 0 &&
+                            statuses.any { it.text == "排队中" && it.currentTextColor == activity.getColor(R.color.download_queued_text) }
+                    }
+                    verified
+                }
+                verifyEpisodeFits()
+                screenshot("downloads-queue-controls.png")
+                scenario.onActivity { it.findViewById<View>(R.id.startAllButton).performClick() }
                 await { ids.all { repository.get(it)?.download?.stopReason == OfflineDownloadRepository.STOP_REASON_USER } }
+                awaitBatchLabel(R.string.download_start_all)
+                // Individually resuming a single task leaves the mixed queue in start-all mode.
+                withContext(Dispatchers.Main) { repository.resume(ids.first()) }
+                await { repository.get(ids.first())?.download?.stopReason == Download.STOP_REASON_NONE }
+                awaitBatchLabel(R.string.download_start_all)
+                scenario.onActivity { it.findViewById<View>(R.id.startAllButton).performClick() }
+                awaitBatchLabel(R.string.download_pause_all)
+                scenario.onActivity {
+                    val list = it.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recycler)
+                    assertTrue(list.getChildAt(0).performLongClick())
+                    assertEquals(it.getString(R.string.download_remove_count, 1), it.findViewById<android.widget.TextView>(R.id.removeSelected).text)
+                    assertFalse(it.findViewById<View>(R.id.backButton).isShown)
+                    it.findViewById<View>(R.id.selectAll).performClick()
+                }
                 scenario.recreate()
                 withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
-                scenario.onActivity { assertFalse(it.findViewById<View>(R.id.pauseAllButton).isEnabled) }
-                screenshot("downloads-all-paused.png")
-                scenario.onActivity { assertTrue(it.findViewById<View>(R.id.resumeAllButton).performClick()) }
-                await { ids.all { repository.get(it)?.download?.stopReason == Download.STOP_REASON_NONE } }
-                withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
-                scenario.onActivity { assertTrue(it.findViewById<View>(R.id.pauseAllButton).isEnabled) }
-                withContext(Dispatchers.Main) {
-                    ids.forEach { repository.remove(it) }
-                    AppGraph.downloadRepository.awaitLoaded()
+                scenario.onActivity {
+                    assertTrue(it.findViewById<com.google.android.material.button.MaterialButton>(R.id.selectAll).isChecked)
+                    assertTrue(it.findViewById<View>(R.id.removeSelected).isEnabled)
                 }
-                scenario.onActivity { assertFalse(it.findViewById<View>(R.id.batchActions).isShown) }
+                verifyEpisodeFits()
+                screenshot("downloads-queue-edit.png")
+                scenario.onActivity { it.findViewById<View>(R.id.removeSelected).performClick() }
+                clickDialogChoice("取消") { screenshot("downloads-delete-confirmation.png") }
+                scenario.onActivity {
+                    assertTrue(it.findViewById<View>(R.id.removeSelected).isEnabled)
+                    assertTrue(ids.all { id -> repository.get(id) != null })
+                    it.findViewById<View>(R.id.removeSelected).performClick()
+                }
+                clickDialogChoice("删除")
+                await { ids.none { repository.get(it) != null } }
             }
         } finally {
-            withContext(Dispatchers.Main) { ids.filter { repository.get(it) != null }.forEach { repository.remove(it) } }
+            withContext(Dispatchers.Main) {
+                ids.filter { repository.get(it) != null }.forEach { repository.remove(it) }
+                repository.setParallelDownloads(previousParallel)
+                repository.setMobileDataAllowed(previousNetwork)
+            }
             gate.cancel()
         }
     }
@@ -376,10 +432,85 @@ class OfflineDownloadDeviceTest {
         }
     }
 
+    @Test(timeout = 60_000)
+    fun allowingOneMobileTaskDoesNotReleaseTheOther() = runBlocking<Unit> {
+        val server = FixtureServer(instrumentation.context)
+        val resolved = CopyOnWriteArrayList<String>()
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val repository = withContext(Dispatchers.Main) {
+            OfflineDownloadRepository(context, object : CatalogRepository by FakeCatalogRepository() {
+                override suspend fun resolveDownload(detail: VideoDetail, episode: Episode): Episode {
+                    resolved += episode.episodeKey
+                    finish.await()
+                    return episode
+                }
+            })
+        }
+        val previous = repository.mobileDataAllowed
+        val episodes = (1..2).map { Episode("consent-$it", "第 ${it} 集", it, server.url("/playback-test.mp4")) }
+        val detail = VideoDetail("consent-fixture", "移动网络测试", "", 1, episodes = episodes)
+        val ids = episodes.map { downloadId(detail.mediaKey, it.episodeKey) }
+        try {
+            withContext(Dispatchers.Main) { repository.setMobileDataAllowed(false) }
+            org.junit.Assume.assumeTrue(repository.needsMobileConsent(ids))
+            val before = repository.storageBytes().first
+            withContext(Dispatchers.Main) { episodes.forEach { repository.enqueue(detail, it) } }
+            ActivityScenario.launch(DownloadsActivity::class.java).use { scenario ->
+                var chosen = ""
+                await {
+                    scenario.onActivity {
+                        val list = it.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recycler)
+                        val row = list.getChildAt(0) ?: return@onActivity
+                        val subtitle = row.findViewById<android.widget.TextView>(R.id.subtitle).text.toString()
+                        chosen = episodes.single { episode -> subtitle.startsWith(episode.episodeTitle) }.episodeKey
+                        row.performClick()
+                    }
+                    chosen.isNotEmpty()
+                }
+                val id = downloadId(detail.mediaKey, chosen)
+                await { repository.get(id)?.download?.stopReason == OfflineDownloadRepository.STOP_REASON_USER }
+                scenario.onActivity {
+                    it.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recycler).getChildAt(0).performClick()
+                }
+                clickDialogChoice("仅本次允许") { screenshot("download-mobile-sheet.png") }
+                await { chosen in resolved }
+                scenario.onActivity { it.findViewById<View>(R.id.startAllButton).performClick() }
+                clickDialogChoice("仅 Wi-Fi 下载") {
+                    instrumentation.runOnMainSync {
+                        val summaries = androidx.test.platform.view.inspector.WindowInspectorCompat.getGlobalWindowViews()
+                            .mapNotNull { it.findViewById<android.widget.TextView>(R.id.selectionSummary) }
+                        assertTrue(summaries.any { it.text == context.getString(R.string.download_data_unknown, 1) })
+                    }
+                }
+                assertFalse(repository.needsMobileConsent(listOf(id)))
+                finish.complete(Unit)
+                await { repository.get(id)?.download?.state == Download.STATE_COMPLETED }
+                assertEquals(listOf(chosen), resolved.toList())
+                assertFalse(repository.mobileDataAllowed)
+                val other = ids.single { it != id }
+                assertEquals(com.aiyifan.app.core.download.STOP_REASON_WIFI, repository.get(other)?.download?.stopReason)
+                assertTrue(repository.storageBytes().first > before)
+                assertTrue(repository.needsMobileConsent(listOf(id)))
+                scenario.onActivity { it.findViewById<View>(R.id.startAllButton).performClick() }
+                clickDialogChoice("始终允许")
+                await { repository.get(other)?.download?.state == Download.STATE_COMPLETED }
+                assertTrue(repository.mobileDataAllowed)
+            }
+        } finally {
+            withContext(Dispatchers.Main) {
+                ids.filter { repository.get(it) != null }.forEach { repository.remove(it) }
+                repository.setMobileDataAllowed(previous)
+            }
+            server.close()
+        }
+    }
+
     @Test(timeout = 30_000)
     fun queuePersistsWithoutRequestsUntilPermittedNetworkAndCanBeDeletedWhileWaiting() = runBlocking {
-        val requirements = androidx.media3.exoplayer.scheduler.Requirements(androidx.media3.exoplayer.scheduler.Requirements.NETWORK_UNMETERED)
-        org.junit.Assume.assumeTrue(requirements.getNotMetRequirements(context) != 0)
+        val policy = com.aiyifan.app.core.download.DownloadNetworkPolicy(context)
+        val requirements = androidx.media3.exoplayer.scheduler.Requirements(androidx.media3.exoplayer.scheduler.Requirements.NETWORK)
+        // The first half needs a restricted transport; after consent Media3 needs a validated network.
+        org.junit.Assume.assumeTrue(policy.needsConsent && requirements.getNotMetRequirements(context) == 0)
         val server = FixtureServer(instrumentation.context)
         var resolves = 0
         val repository = withContext(Dispatchers.Main) {

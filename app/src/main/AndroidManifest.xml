@@ -30,6 +30,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </service>
+        <service android:name=".core.download.WifiDownloadJob" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name="androidx.media3.exoplayer.scheduler.PlatformScheduler$PlatformSchedulerService" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE" />
         <activity android:name=".feature.mine.HeaderImageActivity" android:exported="false" />
         <activity

@@ -25,9 +25,6 @@ class DownloadSelectionSheetTest {
     @Test
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun addingOnMobileShowsWifiMessageAndKeepsTasksAfterSheetCloses() = kotlinx.coroutines.runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val requirements = androidx.media3.exoplayer.scheduler.Requirements(androidx.media3.exoplayer.scheduler.Requirements.NETWORK_UNMETERED)
-        org.junit.Assume.assumeTrue(requirements.getNotMetRequirements(context) != 0)
         val repository = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { com.aiyifan.app.core.data.AppGraph.downloadRepository }
         val previous = repository.mobileDataAllowed
         val episodes = (1..2).map { Episode("waiting-$it", "%02d".format(it), it, null) }
@@ -35,6 +32,7 @@ class DownloadSelectionSheetTest {
         var sheet: BottomSheetDialog? = null
         try {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { repository.setMobileDataAllowed(false) }
+            org.junit.Assume.assumeTrue(repository.needsMobileConsent(setOf("waiting-sheet-fixture")))
             ActivityScenario.launch(DownloadsActivity::class.java).use { scenario ->
                 scenario.onActivity { sheet = DownloadSelectionDialog.show(it, detail) }
                 kotlinx.coroutines.withTimeout(10_000) {
@@ -66,7 +64,7 @@ class DownloadSelectionSheetTest {
                 assertFalse(repository.mobileDataAllowed)
                 assertEquals(2, repository.tasks.value.count { it.metadata?.detail?.mediaKey == detail.mediaKey })
                 assertTrue(repository.tasks.value.filter { it.metadata?.detail?.mediaKey == detail.mediaKey }
-                    .all { it.download.state == androidx.media3.exoplayer.offline.Download.STATE_QUEUED })
+                    .all { it.download.stopReason == com.aiyifan.app.core.download.STOP_REASON_WIFI && it.bytesDownloaded == 0L })
             }
         } finally {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {

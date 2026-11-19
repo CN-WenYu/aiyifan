@@ -35,8 +35,8 @@ class ShortDramaDeviceTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val tabs = activity.findViewById<TabLayout>(R.id.bottomTabs)
-                assertEquals(listOf("首页", "短剧", "我的"), (0..2).map { tabs.getTabAt(it)?.text.toString() })
-                tabs.getTabAt(2)!!.select()
+                assertEquals(listOf("首页", "短剧", "下载", "我的"), (0 until tabs.tabCount).map { tabs.getTabAt(it)?.text.toString() })
+                tabs.getTabAt(MainActivity.TAB_MINE)!!.select()
                 activity.supportFragmentManager.executePendingTransactions()
                 val rows = activity.findViewById<android.view.ViewGroup>(R.id.contentGroup)
                 assertFalse((0 until rows.childCount).any {
@@ -46,7 +46,7 @@ class ShortDramaDeviceTest {
             screenshot("mine-without-local-entry")
             scenario.recreate()
             scenario.onActivity {
-                assertEquals(2, it.findViewById<TabLayout>(R.id.bottomTabs).selectedTabPosition)
+                assertEquals(MainActivity.TAB_MINE, it.findViewById<TabLayout>(R.id.bottomTabs).selectedTabPosition)
             }
         }
     }

@@ -81,6 +81,7 @@
     <string name="login_default_account">爱壹帆用户</string>
     <string name="login_success">登录成功</string>
     <string name="collection_empty">暂无收藏</string>
+    <string name="confirmation_cancel">取消</string>
     <string name="history_clear">清空</string>
     <string name="history_empty">暂无观看记录</string>
     <string name="floating_player_restore">恢复悬浮播放器</string>

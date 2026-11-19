@@ -41,14 +41,14 @@
         android:paddingBottom="12dp" android:clipToPadding="false" />
 
     <androidx.core.widget.NestedScrollView android:id="@+id/statusScroll" android:layout_width="match_parent"
-        android:layout_height="0dp" android:layout_weight="1" android:visibility="gone" android:fillViewport="true">
+        android:layout_height="wrap_content" android:layout_weight="1" android:visibility="gone" android:fillViewport="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical" android:padding="24dp" android:gravity="center_vertical">
+            android:orientation="vertical" android:paddingHorizontal="20dp" android:paddingVertical="12dp" android:gravity="center_vertical">
             <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/preparationProgress"
-                android:layout_width="match_parent" android:layout_height="wrap_content" android:indeterminate="true"
+                android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="16dp" android:indeterminate="true"
                 app:indicatorColor="@color/accent" app:trackColor="@color/field_bg" app:trackThickness="4dp" app:trackCornerRadius="2dp" />
             <TextView android:id="@+id/statusTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="24dp" android:textColor="@color/text_primary" android:textSize="18sp"
+                android:textColor="@color/text_primary" android:textSize="16sp"
                 android:textStyle="bold" android:accessibilityLiveRegion="polite" />
             <TextView android:id="@+id/statusMessage" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="12dp" android:lineSpacingExtra="5dp" android:textColor="@color/text_secondary" android:textSize="14sp" />
@@ -66,10 +66,14 @@
             android:layout_width="match_parent" android:layout_height="56dp" android:layout_marginTop="10dp"
             android:insetTop="2dp" android:insetBottom="2dp" android:text="@string/download_start"
             android:textSize="15sp" android:textStyle="bold" android:textColor="@color/download_button_text"
-            app:backgroundTint="@color/download_button_background" app:cornerRadius="14dp" app:elevation="0dp" />
+            app:backgroundTint="@color/download_button_background" app:cornerRadius="@dimen/dialog_action_radius" app:elevation="0dp" />
         <com.google.android.material.button.MaterialButton android:id="@+id/secondaryButton"
             style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent"
             android:layout_height="48dp" android:text="@android:string/ok" android:textColor="@color/text_secondary"
             android:visibility="gone" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/wifiOnlyButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton" android:layout_width="match_parent"
+            android:layout_height="48dp" android:text="@string/download_data_wifi" android:textAllCaps="false"
+            android:textColor="@color/text_primary" android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>

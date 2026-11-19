@@ -41,7 +41,7 @@ class HeaderExpansionTouchTest {
         val activity = controller.get()
         activity.setTheme(R.style.AppTheme)
         AppGraph.initialize(activity)
-        controller.create(Bundle().apply { putInt(MainActivity.KEY_SELECTED_TAB, 2) }).start().resume().visible()
+        controller.create(Bundle().apply { putInt(MainActivity.KEY_SELECTED_TAB, MainActivity.TAB_MINE) }).start().resume().visible()
         val frame = activity.findViewById<FrameLayout>(R.id.fragmentContainer)
         val fragment = MineFragment()
         activity.supportFragmentManager.beginTransaction().add(frame.id, fragment).commitNow()

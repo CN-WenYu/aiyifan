@@ -39,7 +39,7 @@ object DownloadSelectionDialog {
         return SelectionSheet(activity, detail).show()
     }
 
-    private enum class Stage { SELECT, PREPARING, RESULT, MOBILE_CONFIRM }
+    private enum class Stage { SELECT, PREPARING, RESULT }
 
     private class SelectionSheet(private val activity: AppCompatActivity, private val detail: VideoDetail) {
         val repository = AppGraph.downloadRepository
@@ -49,7 +49,7 @@ object DownloadSelectionDialog {
         private var existing = emptyMap<String, Int>()
         private var loaded = false
         private var stage = Stage.SELECT
-        private var waitingForWifi = false
+        private var waitingIds = emptySet<String>()
         private var preparation: Job? = null
         private var observation: Job? = null
         private val adapter = EpisodeGridAdapter(detail.episodes) { key ->
@@ -97,23 +97,16 @@ object DownloadSelectionDialog {
                     Stage.PREPARING -> preparation?.cancel()
                     Stage.RESULT -> {
                         dialog.dismiss()
-                        if (!waitingForWifi) activity.startActivity(Intent(activity, DownloadsActivity::class.java))
-                    }
-                    Stage.MOBILE_CONFIRM -> {
-                        repository.setMobileDataAllowed(true)
-                        dialog.dismiss()
-                        activity.startActivity(Intent(activity, DownloadsActivity::class.java))
+                        if (waitingIds.isEmpty()) activity.startActivity(Intent(activity, DownloadsActivity::class.java))
                     }
                 }
             }
             binding.secondaryButton.setOnClickListener {
-                if (stage == Stage.RESULT && waitingForWifi) {
-                    stage = Stage.MOBILE_CONFIRM
-                    binding.sheetTitle.setText(R.string.download_mobile_allowed)
-                    binding.statusTitle.setText(R.string.download_mobile_confirmation)
-                    binding.statusMessage.isVisible = false
-                    binding.primaryButton.setText(R.string.download_mobile_enable)
-                    binding.secondaryButton.setText(android.R.string.cancel)
+                if (stage == Stage.RESULT && waitingIds.isNotEmpty()) {
+                    activity.bindDownloadConsent(binding, dialog, waitingIds) { once ->
+                        if (once) repository.allowOnce(waitingIds)
+                        if (repository.mobileDataAllowed || once) activity.startActivity(Intent(activity, DownloadsActivity::class.java))
+                    }
                 } else dialog.dismiss()
             }
             dialog.setOnDismissListener {
@@ -155,7 +148,8 @@ object DownloadSelectionDialog {
                 selected.isEmpty() -> activity.getString(R.string.download_selection_empty)
                 else -> activity.getString(R.string.download_selection_count, selected.size)
             }
-            binding.networkHint.setText(if (repository.mobileDataAllowed) R.string.download_sheet_mobile_hint else R.string.download_sheet_wifi_hint)
+            binding.networkHint.text = if (repository.mobileDataAllowed) activity.getString(R.string.download_sheet_mobile_hint)
+                else activity.getString(R.string.download_sheet_wifi_hint, repository.parallelDownloads)
             binding.primaryButton.isEnabled = loaded && selected.isNotEmpty()
             binding.primaryButton.text = if (selected.isEmpty()) activity.getString(R.string.download_start)
                 else activity.getString(R.string.download_start_count, selected.size)
@@ -166,6 +160,7 @@ object DownloadSelectionDialog {
             adapter.submitState(selected, existing, loaded)
         }
 
+        @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
         private fun prepare() {
             val keys = detail.episodes.map { it.episodeKey }.filter { it in selected }
             val episodes = detail.episodes.associateBy { it.episodeKey }
@@ -191,11 +186,15 @@ object DownloadSelectionDialog {
                 } finally {
                     if (dialog.isShowing && activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
                         stage = Stage.RESULT
-                        waitingForWifi = !repository.mobileDataAllowed && repository.isWaitingForNetwork && reports.any { it.status != PreparationStatus.FAILED }
+                        waitingIds = reports.filter { it.status == PreparationStatus.ADDED }
+                            .map { com.aiyifan.app.core.download.downloadId(detail.mediaKey, it.id) }
+                            .filter { repository.get(it)?.download?.stopReason == com.aiyifan.app.core.download.STOP_REASON_WIFI }
+                            .toSet()
+                        val waitingForWifi = waitingIds.isNotEmpty()
                         binding.preparationProgress.isVisible = false
                         binding.sheetTitle.setText(R.string.download_sheet_result)
                         binding.statusTitle.text = if (waitingForWifi) activity.getString(R.string.download_added_waiting_wifi,
-                            reports.count { it.status != PreparationStatus.FAILED }) else activity.getString(R.string.download_preparation_result,
+                            waitingIds.size) else activity.getString(R.string.download_preparation_result,
                             reports.count { it.status == PreparationStatus.ADDED },
                             reports.count { it.status == PreparationStatus.EXISTING },
                             reports.count { it.status == PreparationStatus.FAILED })
@@ -211,11 +210,8 @@ object DownloadSelectionDialog {
                         binding.primaryButton.setText(if (waitingForWifi) R.string.download_sheet_acknowledge else R.string.download_view_tasks)
                         binding.secondaryButton.setText(if (waitingForWifi) R.string.download_sheet_allow_mobile else R.string.download_sheet_acknowledge)
                         binding.secondaryButton.isVisible = true
-                        val windowHeight = activity.window.decorView.height.takeIf { it > 0 }
-                            ?: activity.resources.displayMetrics.heightPixels
-                        val landscape = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
                         binding.root.layoutParams = binding.root.layoutParams.apply {
-                            height = (windowHeight * if (landscape) 0.9f else 0.48f).toInt()
+                            height = ViewGroup.LayoutParams.WRAP_CONTENT
                         }
                     }
                 }

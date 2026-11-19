@@ -25,6 +25,7 @@ import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.setupEdgeToEdge
 import com.aiyifan.app.core.ui.usesLightSystemBarIcons
 import com.aiyifan.app.databinding.ActivityMainBinding
+import com.aiyifan.app.feature.download.DownloadLibraryFragment
 import com.aiyifan.app.feature.home.HomeFragment
 import com.aiyifan.app.feature.shortdrama.ShortDramaFragment
 import com.aiyifan.app.feature.mine.MineFragment
@@ -65,7 +66,7 @@ class MainActivity : AppCompatActivity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             view.updatePadding(
                 left = bars.left,
-                top = if (binding.bottomTabs.selectedTabPosition == 2) 0 else bars.top,
+                top = if (binding.bottomTabs.selectedTabPosition == TAB_MINE) 0 else bars.top,
                 right = bars.right,
             )
             insets
@@ -117,9 +118,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateTopBackground(selectedPosition: Int) {
         val color = getColor(if (selectedPosition == 1) R.color.page_bg else R.color.surface)
         binding.fragmentContainer.setBackgroundColor(color)
-        window.statusBarColor = if (selectedPosition == 2) android.graphics.Color.TRANSPARENT else color
+        window.statusBarColor = if (selectedPosition == TAB_MINE) android.graphics.Color.TRANSPARENT else color
         WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars =
-            selectedPosition != 2 && usesLightSystemBarIcons(resources.configuration.uiMode)
+            selectedPosition != TAB_MINE && usesLightSystemBarIcons(resources.configuration.uiMode)
         ViewCompat.requestApplyInsets(binding.fragmentContainer)
     }
 
@@ -131,13 +132,15 @@ class MainActivity : AppCompatActivity() {
     private fun fragmentFor(position: Int): Fragment {
         val type = when (position) {
             1 -> ShortDramaFragment::class.java
-            2 -> MineFragment::class.java
+            TAB_DOWNLOADS -> DownloadLibraryFragment::class.java
+            TAB_MINE -> MineFragment::class.java
             else -> HomeFragment::class.java
         }
         supportFragmentManager.findFragmentByTag(type.name)?.let { return it }
         return when (position) {
             1 -> ShortDramaFragment()
-            2 -> MineFragment()
+            TAB_DOWNLOADS -> DownloadLibraryFragment()
+            TAB_MINE -> MineFragment()
             else -> HomeFragment.newInstance(intent.getStringExtra(EXTRA_CATEGORY_ID))
         }
     }
@@ -154,7 +157,13 @@ class MainActivity : AppCompatActivity() {
             .commitNow()
     }
 
+    fun selectHome() {
+        binding.bottomTabs.getTabAt(0)?.select()
+    }
+
     companion object {
+        internal const val TAB_DOWNLOADS = 2
+        internal const val TAB_MINE = 3
         const val KEY_SELECTED_TAB = "selected_tab"
         const val EXTRA_CATEGORY_ID = "categoryId"
 

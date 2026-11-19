@@ -2,27 +2,31 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:background="@drawable/bg_page">
-    <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="56dp" android:orientation="horizontal" android:gravity="center_vertical" android:background="@color/surface">
-        <ImageButton android:id="@+id/backButton" android:layout_width="56dp" android:layout_height="match_parent" android:padding="16dp" android:src="@drawable/ic_back" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="@string/hardcoded_text_001" app:tint="@color/text_primary" />
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/downloads_title" android:textColor="@color/text_primary" android:textSize="20sp" android:textStyle="bold" />
-    </LinearLayout>
-    <androidx.appcompat.widget.SwitchCompat android:id="@+id/mobileDataSwitch" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp" android:paddingHorizontal="16dp" android:text="@string/download_mobile_allowed" android:textColor="@color/text_primary" />
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="16dp" android:paddingBottom="8dp" android:text="@string/download_network_hint" android:textSize="12sp" android:textColor="@color/text_secondary" />
-    <com.google.android.material.tabs.TabLayout android:id="@+id/tabs" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" app:tabTextColor="@color/text_secondary" app:tabSelectedTextColor="@color/accent" app:tabIndicatorColor="@color/accent" />
+    <FrameLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="56dp"
+        android:background="@color/surface">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center"
+            android:text="@string/download_queue_title" android:textSize="18sp" android:textStyle="bold" android:textColor="@color/text_primary" />
+        <ImageButton android:id="@+id/backButton" android:layout_width="56dp" android:layout_height="match_parent"
+            android:layout_gravity="start" android:padding="16dp" android:src="@drawable/ic_back"
+            android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="@string/hardcoded_text_001" app:tint="@color/text_primary" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/editButton" style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_gravity="end"
+            android:text="@string/download_edit" android:textColor="@color/download_queue_action_text" />
+    </FrameLayout>
     <LinearLayout android:id="@+id/batchActions" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="end|center_vertical" android:paddingHorizontal="12dp"
-        android:background="@color/surface" android:visibility="gone">
-        <com.google.android.material.button.MaterialButton android:id="@+id/pauseAllButton"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
-            android:text="@string/download_pause_all" android:textColor="@color/download_queue_action_text" />
-        <com.google.android.material.button.MaterialButton android:id="@+id/resumeAllButton"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
-            android:text="@string/download_resume_all" android:textColor="@color/download_queue_action_text" />
+        android:paddingHorizontal="16dp" android:paddingTop="12dp" android:paddingBottom="4dp" android:gravity="center_vertical">
+        <com.google.android.material.button.MaterialButton android:id="@+id/startAllButton" style="@style/Widget.Aiyifan.QueueButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/download_start_all"
+            app:backgroundTint="@color/download_button_background" app:icon="@drawable/ic_play" app:iconTint="@color/download_primary_label" app:iconSize="16dp" android:textColor="@color/download_primary_label" />
+        <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/parallelButton" style="@style/Widget.Aiyifan.QueueButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp" android:textColor="@color/text_primary" />
     </LinearLayout>
     <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/recycler" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="16dp" android:clipToPadding="false" />
-        <TextView android:id="@+id/emptyView" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="32dp" android:gravity="center" android:textColor="@color/text_secondary" android:textSize="15sp" />
+        <TextView android:id="@+id/emptyView" android:text="@string/download_empty_active" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="32dp" android:gravity="center" android:textColor="@color/text_secondary" android:textSize="15sp" />
     </FrameLayout>
+    <include android:id="@+id/editActions" layout="@layout/download_edit_actions" />
+    <TextView android:id="@+id/storage" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp" android:paddingVertical="10dp" android:gravity="center" android:textColor="@color/text_secondary" android:textSize="12sp" />
 </LinearLayout>

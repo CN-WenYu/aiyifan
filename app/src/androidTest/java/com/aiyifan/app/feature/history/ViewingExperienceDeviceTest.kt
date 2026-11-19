@@ -100,6 +100,32 @@ class ViewingExperienceDeviceTest {
         }
     }
 
+    @Test
+    fun clearingWatchHistoryRequiresExplicitConfirmation() {
+        org.junit.Assume.assumeTrue("Requires an isolated history", repository.getHistory().isEmpty())
+        main { repository.saveHistory(first, first.episodes.first(), 1000, 2000) }
+        try {
+            ActivityScenario.launch(HistoryActivity::class.java).use { scenario ->
+                fun clickDialogButton(id: Int) {
+                    scenario.onActivity {
+                        val button = androidx.test.platform.view.inspector.WindowInspectorCompat.getGlobalWindowViews()
+                            .firstNotNullOf { root -> root.findViewById<android.view.View>(id) }
+                        button.performClick()
+                    }
+                }
+                scenario.onActivity { it.findViewById<TextView>(R.id.actionButton).performClick() }
+                screenshot("history-clear-confirmation")
+                clickDialogButton(R.id.cancelButton)
+                assertEquals(listOf(first.mediaKey), repository.getHistory().map { it.mediaKey })
+                scenario.onActivity { it.findViewById<TextView>(R.id.actionButton).performClick() }
+                clickDialogButton(R.id.confirmButton)
+                assertTrue(repository.getHistory().isEmpty())
+            }
+        } finally {
+            main { repository.removeHistory(setOf(first.mediaKey)) }
+        }
+    }
+
     @Test fun deferredHomePosterDoesNotLoadAfterActivityDestruction() {
         lateinit var oldActivity: MainActivity
         val scenario = ActivityScenario.launch(MainActivity::class.java)

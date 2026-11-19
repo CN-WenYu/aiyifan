@@ -65,5 +65,8 @@
     <dimen name="sp_22">22sp</dimen>
     <dimen name="sp_26">26sp</dimen>
 
+    <dimen name="dialog_panel_radius">24dp</dimen>
+    <dimen name="dialog_action_radius">14dp</dimen>
+
     <dimen name="mine_header_height">280dp</dimen>
 </resources>

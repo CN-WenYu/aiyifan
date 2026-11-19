@@ -14,11 +14,11 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.WatchHistory
+import com.aiyifan.app.core.ui.showDestructiveConfirmation
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.setupEdgeToEdge
 import com.aiyifan.app.databinding.ActivitySimpleListBinding
 import com.aiyifan.app.feature.video.VideoPlayerActivity
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class HistoryActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySimpleListBinding
@@ -101,21 +101,20 @@ class HistoryActivity : AppCompatActivity() {
 
     private fun confirmDelete(keys: Set<String>) {
         if (keys.isEmpty()) return
-        MaterialAlertDialogBuilder(this)
-            .setMessage(getString(R.string.history_delete_confirmation, keys.size))
-            .setNegativeButton(R.string.history_cancel, null)
-            .setPositiveButton(R.string.history_delete) { _, _ ->
-                selection = null
-                repository.removeHistory(keys)
-                render()
-            }.show()
+        showDestructiveConfirmation(R.string.history_delete_title, getString(R.string.history_delete_confirmation, keys.size),
+            R.string.history_delete) {
+            selection = null
+            repository.removeHistory(keys)
+            render()
+        }
     }
 
     private fun confirmClear() {
-        MaterialAlertDialogBuilder(this)
-            .setMessage(R.string.history_clear_confirmation)
-            .setNegativeButton(R.string.history_cancel, null)
-            .setPositiveButton(R.string.history_clear) { _, _ -> repository.clearHistory(); render() }.show()
+        showDestructiveConfirmation(R.string.history_clear_title, getString(R.string.history_clear_confirmation),
+            R.string.history_clear) {
+            repository.clearHistory()
+            render()
+        }
     }
 
     private fun render() {
