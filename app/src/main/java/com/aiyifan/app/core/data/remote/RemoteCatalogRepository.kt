@@ -313,6 +313,9 @@ class RemoteCatalogRepository(
 
     override fun getHistory(): List<WatchHistory> = historyStore.getHistory()
 
+    override fun getEpisodeHistory(mediaKey: String, episodeKey: String): WatchHistory? =
+        historyStore.getEpisodeHistory(mediaKey, episodeKey)
+
     override fun clearHistory() {
         historyStore.clear()
         historyListeners.forEach { it() }

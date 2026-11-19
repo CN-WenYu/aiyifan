@@ -57,11 +57,8 @@ class LocalMediaFragment : Fragment() {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        binding.root.applySystemBarsPadding(left = true, right = true)
+        binding.root.applySystemBarsPadding(left = true, right = true, bottom = true)
         binding.localHeader.applySystemBarsPadding(top = true, growHeight = true)
-        binding.localRecycler.applySystemBarsPadding(bottom = true)
-        binding.localPermissionState.applySystemBarsPadding(bottom = true)
-        binding.localEmptyState.applySystemBarsPadding(bottom = true)
         adapter = LocalMediaAdapter { video ->
             startActivity(LocalVideoPlayerActivity.intent(requireContext(), video))
         }

@@ -3,6 +3,8 @@ package com.aiyifan.app.core.ui
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
+import androidx.core.view.isVisible
+import com.aiyifan.app.R
 import com.aiyifan.app.core.model.Comment
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.databinding.ItemCommentBinding
@@ -14,13 +16,20 @@ class EpisodeAdapter(
     private val items = mutableListOf<Episode>()
     private var selectedKey: String? = null
     private var selectionEnabled = true
+    private var downloadedKeys: Set<String>? = null
 
-    fun submitList(episodes: List<Episode>, selected: Episode?, enabled: Boolean = true) {
-        if (items == episodes && selectedKey == selected?.episodeKey && selectionEnabled == enabled) return
+    fun submitList(
+        episodes: List<Episode>,
+        selected: Episode?,
+        enabled: Boolean = true,
+        downloadedEpisodeKeys: Set<String>? = null,
+    ) {
+        if (items == episodes && selectedKey == selected?.episodeKey && selectionEnabled == enabled && downloadedKeys == downloadedEpisodeKeys) return
         items.clear()
         items.addAll(episodes)
         selectedKey = selected?.episodeKey
         selectionEnabled = enabled
+        downloadedKeys = downloadedEpisodeKeys
         notifyDataSetChanged()
     }
 
@@ -30,7 +39,7 @@ class EpisodeAdapter(
     }
 
     override fun onBindViewHolder(holder: EpisodeViewHolder, position: Int) {
-        holder.bind(items[position], items[position].episodeKey == selectedKey, selectionEnabled)
+        holder.bind(items[position], items[position].episodeKey == selectedKey, selectionEnabled, downloadedKeys)
     }
 
     override fun getItemCount(): Int = items.size
@@ -39,14 +48,22 @@ class EpisodeAdapter(
         private val binding: ItemEpisodeBinding,
         private val onClick: (Episode) -> Unit,
     ) : RecyclerView.ViewHolder(binding.root) {
-        fun bind(episode: Episode, selected: Boolean, enabled: Boolean) {
+        fun bind(episode: Episode, selected: Boolean, enabled: Boolean, downloadedKeys: Set<String>?) {
             val appearance = ChipAppearanceResolver.forSelection(selected)
             binding.episodeTitle.text = episode.episodeTitle
             binding.episodeTitle.isSelected = selected
-            binding.episodeTitle.setBackgroundResource(appearance.backgroundRes)
+            binding.root.isSelected = selected
+            binding.root.setBackgroundResource(appearance.backgroundRes)
             binding.episodeTitle.setTextColor(
                 binding.root.resources.getColor(appearance.textColorRes, null),
             )
+            binding.episodeState.isVisible = downloadedKeys != null
+            if (downloadedKeys != null) {
+                binding.episodeState.setText(
+                    if (episode.episodeKey in downloadedKeys) R.string.download_library_downloaded
+                    else R.string.download_library_not_downloaded,
+                )
+            }
             binding.root.alpha = 1.0f
             binding.root.isEnabled = enabled
             binding.root.setOnClickListener { onClick(episode) }

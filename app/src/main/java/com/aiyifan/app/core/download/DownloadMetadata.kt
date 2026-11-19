@@ -24,6 +24,20 @@ data class DownloadTask(
     val preparing: Boolean = false,
 ) {
     val id: String get() = download.request.id
+    internal val queueAction: DownloadQueueAction?
+        get() = if (metadata == null) null else DownloadQueueAction.forState(download.state)
+}
+
+internal enum class DownloadQueueAction {
+    PAUSE, RESUME;
+
+    companion object {
+        fun forState(state: Int): DownloadQueueAction? = when (state) {
+            Download.STATE_QUEUED, Download.STATE_DOWNLOADING -> PAUSE
+            Download.STATE_STOPPED -> RESUME
+            else -> null
+        }
+    }
 }
 
 /** Only an offline playback snapshot is stored; favorites, history and unrelated episodes stay out. */

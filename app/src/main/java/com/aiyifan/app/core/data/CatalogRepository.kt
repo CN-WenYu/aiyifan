@@ -73,6 +73,9 @@ interface CatalogRepository {
 
     fun getHistory(): List<WatchHistory>
 
+    fun getEpisodeHistory(mediaKey: String, episodeKey: String): WatchHistory? =
+        getHistory().firstOrNull { it.mediaKey == mediaKey && it.episodeKey == episodeKey }
+
     fun clearHistory()
 
     fun toggleFavorite(detail: VideoDetail): Boolean

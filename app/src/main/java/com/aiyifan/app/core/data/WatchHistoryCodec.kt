@@ -25,15 +25,21 @@ internal object WatchHistoryCodec {
     }
 
     fun decode(payload: String?): List<WatchHistory> {
+        return InMemoryWatchHistoryStore().also { store ->
+            decodeAll(payload).forEach(store::save)
+        }.getHistory()
+    }
+
+    internal fun decodeAll(payload: String?): List<WatchHistory> {
         if (payload.isNullOrBlank()) return emptyList()
         val items = runCatching { JSONArray(payload) }.getOrNull() ?: return emptyList()
-        val store = InMemoryWatchHistoryStore()
+        val records = mutableListOf<WatchHistory>()
         for (index in 0 until items.length()) {
             val item = items.optJSONObject(index) ?: continue
             val record = decodeRecord(item) ?: continue
-            store.save(record)
+            records += record
         }
-        return store.getHistory()
+        return records
     }
 
     private fun decodeRecord(item: JSONObject): WatchHistory? {

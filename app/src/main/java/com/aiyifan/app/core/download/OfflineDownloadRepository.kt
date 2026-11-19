@@ -140,18 +140,23 @@ class OfflineDownloadRepository(
         }
     }
 
-    fun pause(id: String) {
-        checkMainThread()
-        manager.setStopReason(id, STOP_REASON_USER)
-        refresh()
-    }
+    fun pause(id: String) = applyQueueAction(DownloadQueueAction.PAUSE, setOf(id))
 
-    fun resume(id: String) {
+    fun resume(id: String) = applyQueueAction(DownloadQueueAction.RESUME, setOf(id))
+
+    internal fun applyQueueAction(action: DownloadQueueAction, ids: Set<String>) {
         checkMainThread()
-        startService()
-        manager.setStopReason(id, Download.STOP_REASON_NONE)
-        manager.resumeDownloads()
-        refresh()
+        // A task may have finished or been removed since the list was rendered.
+        val targets = manager.currentDownloads.filter {
+            it.request.id in ids && DownloadQueueAction.forState(it.state) == action
+        }
+        if (targets.isEmpty()) return
+        val resume = action == DownloadQueueAction.RESUME
+        if (resume) startService()
+        val reason = if (resume) Download.STOP_REASON_NONE else STOP_REASON_USER
+        targets.forEach { manager.setStopReason(it.request.id, reason) }
+        if (resume) manager.resumeDownloads()
+        // The manager listener publishes the resulting states, including downloads waiting for Wi-Fi.
     }
 
     suspend fun retry(id: String) = mutation(id).withLock {

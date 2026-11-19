@@ -40,7 +40,8 @@ class LocalMediaInsetsTest {
             assertEquals(0, container.paddingBottom)
             assertEquals(32, header.paddingTop)
             assertEquals(initialHeaderHeight + 32, header.layoutParams.height)
-            assertEquals(initialBottom + 48, list.paddingBottom)
+            assertEquals(48, fragment.paddingBottom)
+            assertEquals(initialBottom, list.paddingBottom)
         } finally {
             controller.pause().stop().destroy()
             StartupSession.mode = null

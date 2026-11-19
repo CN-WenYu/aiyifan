@@ -20,10 +20,14 @@ import androidx.media3.exoplayer.offline.Download
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
+import com.aiyifan.app.core.download.DownloadQueueAction
 import com.aiyifan.app.core.download.DownloadTask
 import com.aiyifan.app.core.download.OfflineDownloadRepository
+import com.aiyifan.app.core.download.downloadId
+import com.aiyifan.app.core.model.Episode
+import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.ui.applySystemBarsPadding
-import com.aiyifan.app.core.ui.setupEdgeToEdge
+import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.ActivityDownloadsBinding
 import com.aiyifan.app.feature.video.VideoPlayerActivity
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -49,12 +53,14 @@ class DownloadsActivity : AppCompatActivity() {
             return
         }
         super.onCreate(savedInstanceState)
-        setupEdgeToEdge()
+        setupPageSystemBars()
         binding = ActivityDownloadsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.root.applySystemBarsPadding(left = true, right = true, bottom = true)
         binding.topBar.applySystemBarsPadding(top = true, growHeight = true)
         binding.backButton.setOnClickListener { finish() }
+        binding.pauseAllButton.setOnClickListener { applyToQueue(DownloadQueueAction.PAUSE) }
+        binding.resumeAllButton.setOnClickListener { applyToQueue(DownloadQueueAction.RESUME) }
         binding.recycler.layoutManager = LinearLayoutManager(this)
         binding.recycler.itemAnimator = null
         selectedTab = savedInstanceState?.getInt("tab") ?: 0
@@ -102,9 +108,14 @@ class DownloadsActivity : AppCompatActivity() {
         val tasks = repository.tasks.value
         films = downloadFilms(tasks.mapNotNull { task ->
             task.metadata?.let { LibraryDownload(task.id, it.detail, it.episode, it.episodeOrder, task.bytesDownloaded, episodeState(task)) }
-        }, repository::filmSnapshot)
+        }, repository::filmSnapshot) { mediaKey, episodeKey ->
+            AppGraph.catalogRepository.getEpisodeHistory(mediaKey, episodeKey)
+        }
         // Unreadable records remain removable instead of disappearing from the library.
         val active = tasks.filter { it.download.state != Download.STATE_COMPLETED || it.metadata == null }
+        binding.batchActions.isVisible = selectedTab == 0 && active.any { it.queueAction != null }
+        binding.pauseAllButton.isEnabled = active.any { it.queueAction == DownloadQueueAction.PAUSE && it.id !in busy }
+        binding.resumeAllButton.isEnabled = active.any { it.queueAction == DownloadQueueAction.RESUME && it.id !in busy }
         binding.tabs.getTabAt(0)?.text = getString(R.string.download_active_tab, active.size)
         binding.tabs.getTabAt(1)?.text = getString(R.string.download_completed_tab, films.size)
         val targetAdapter = if (selectedTab == 1) completedAdapter else activeAdapter
@@ -167,8 +178,14 @@ class DownloadsActivity : AppCompatActivity() {
 
     private fun showEpisodes(mediaKey: String, managing: Boolean) {
         val film = films.firstOrNull { it.detail.mediaKey == mediaKey } ?: return
-        librarySheet = DownloadLibrarySheet(this, mediaKey, managing, ::performAction, ::removeCompleted) { librarySheet = null }
+        librarySheet = DownloadLibrarySheet(this, mediaKey, managing, ::performAction, ::enqueueEpisode, ::removeCompleted) { librarySheet = null }
             .also { it.show(film) }
+    }
+
+    private fun enqueueEpisode(detail: VideoDetail, episode: Episode) {
+        val id = downloadId(detail.mediaKey, episode.episodeKey)
+        if (repository.get(id) != null) return
+        operation(id) { repository.enqueue(detail, episode) }
     }
 
     private fun performAction(id: String) {
@@ -180,6 +197,15 @@ class DownloadsActivity : AppCompatActivity() {
             Download.STATE_FAILED -> operation(id) { repository.retry(id) }
             Download.STATE_STOPPED -> operation(id) { repository.resume(id) }
             Download.STATE_QUEUED, Download.STATE_DOWNLOADING -> operation(id) { repository.pause(id) }
+        }
+    }
+
+    private fun applyToQueue(action: DownloadQueueAction) {
+        val ids = repository.tasks.value.filter { it.queueAction == action && it.id !in busy }.mapTo(mutableSetOf()) { it.id }
+        try {
+            repository.applyQueueAction(action, ids)
+        } catch (_: Exception) {
+            showOperationFailure()
         }
     }
 

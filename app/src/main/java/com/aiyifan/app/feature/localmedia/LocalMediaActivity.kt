@@ -1,14 +1,13 @@
 package com.aiyifan.app.feature.localmedia
 
+import android.os.Bundle
+import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AppCompatActivity
 import com.aiyifan.app.core.startup.AppMode
 import com.aiyifan.app.core.startup.StartupSession
-import com.aiyifan.app.feature.startup.StartupActivity
-
-import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
-import androidx.activity.OnBackPressedCallback
-import com.aiyifan.app.core.ui.setupEdgeToEdge
+import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.ActivityLocalMediaBinding
+import com.aiyifan.app.feature.startup.StartupActivity
 
 class LocalMediaActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -18,7 +17,7 @@ class LocalMediaActivity : AppCompatActivity() {
             return
         }
         super.onCreate(savedInstanceState)
-        setupEdgeToEdge()
+        setupPageSystemBars()
         val binding = ActivityLocalMediaBinding.inflate(layoutInflater)
         setContentView(binding.root)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

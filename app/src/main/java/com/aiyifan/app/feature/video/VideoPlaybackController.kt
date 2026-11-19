@@ -114,10 +114,11 @@ class VideoPlaybackController(
         private set
     private var offlineLoadFailed = false
     private var activeOfflineDownloadId: String? = null
+    private var offlineSession = false
     var requestedOfflineDownloadId: String? = null
         private set
-    val isOffline: Boolean get() = requestedOfflineDownloadId != null
-    val hasOfflinePlaybackError: Boolean get() = isOffline && (offlineLoadFailed || engine.hasPlaybackError)
+    val isOffline: Boolean get() = offlineSession
+    val hasOfflinePlaybackError: Boolean get() = offlineLoadFailed || activeOfflineDownloadId != null && engine.hasPlaybackError
     val hasPlaybackError: Boolean get() = !released && (engine.hasPlaybackError || hasOfflinePlaybackError)
 
     private var activeDetail: VideoDetail? = null
@@ -174,6 +175,7 @@ class VideoPlaybackController(
         endedAdvanceEpisodeKey = null
         requestedMediaKey = mediaKey
         requestedOfflineDownloadId = offlineDownloadId
+        offlineSession = offlineDownloadId != null
         offlineLoadFailed = false
         if (activeDetail?.mediaKey != mediaKey || sourceChanged) {
             replacingMedia = true
@@ -234,7 +236,7 @@ class VideoPlaybackController(
         try {
             if (offlineDownloadId == null) engine.setMediaUrl(mediaUrl) else engine.setOfflineMedia(offlineDownloadId)
             activeOfflineDownloadId = offlineDownloadId
-            requestedOfflineDownloadId = offlineDownloadId
+            if (offlineDownloadId != null) requestedOfflineDownloadId = offlineDownloadId
             offlineLoadFailed = false
             activeDetail = detail
             activeEpisode = episode
@@ -298,8 +300,7 @@ class VideoPlaybackController(
     suspend fun switchEpisode(offset: Int): EpisodeSwitchResult {
         val detail = activeDetail ?: return EpisodeSwitchResult.Unavailable
         val activeEpisode = activeEpisode ?: return EpisodeSwitchResult.Unavailable
-        val episodes = if (isOffline) offlineCatalog?.completed(detail.mediaKey)
-            ?.sortedBy { it.episodeOrder }?.map { it.episode }.orEmpty() else detail.episodes
+        val episodes = detail.episodes
         val activeIndex = episodes.indexOfFirst { it.episodeKey == activeEpisode.episodeKey }
         if (activeIndex < 0 || offset !in listOf(-1, 1)) return EpisodeSwitchResult.Unavailable
         val targetEpisode = episodes.getOrNull(activeIndex + offset) ?: return EpisodeSwitchResult.Unavailable
@@ -319,7 +320,13 @@ class VideoPlaybackController(
         if (!ended && !skipOutro) return EpisodeSwitchResult.Unavailable
         endedAdvanceEpisodeKey = current.episodeKey
         return try {
-            switchEpisode(offset = 1)
+            switchEpisode(offset = 1).also { result ->
+                if (result is EpisodeSwitchResult.Failed) {
+                    pause()
+                    // Keep the failed transition retryable after the player is paused.
+                    paused = false
+                }
+            }
         } catch (error: CancellationException) {
             if (endedAdvanceEpisodeKey == current.episodeKey) {
                 endedAdvanceEpisodeKey = null
@@ -338,8 +345,7 @@ class VideoPlaybackController(
         if (requestedMediaKey != null && requestedMediaKey != detail.mediaKey) return EpisodeSwitchResult.Unavailable
         if (isOffline) {
             val entry = offlineCatalog?.completed(detail.mediaKey)?.firstOrNull { it.episode.episodeKey == episode.episodeKey }
-                ?: return offlineFailure()
-            return loadOfflineDownload(entry.id, resumePositionMs)
+            if (entry != null) return loadOfflineDownload(entry.id, resumePositionMs)
         }
         sleepTimer.onSelection(detail.mediaKey, episode.episodeKey)
         val version = ++requestVersion
@@ -356,7 +362,7 @@ class VideoPlaybackController(
             currentCoroutineContext().ensureActive()
             if (released || version != requestVersion) return EpisodeSwitchResult.Unavailable
             val position = AutoSkipPolicy.initialPositionMs(resumePositionMs, playable.opSecond, skipIntro())
-            return if (prepare(detail, playable, position)) EpisodeSwitchResult.Switched(playable)
+            return if (prepare(detail, playable, position, offlineDownloadId = null)) EpisodeSwitchResult.Switched(playable)
             else EpisodeSwitchResult.Failed
         } catch (error: CancellationException) {
             throw error
@@ -374,11 +380,12 @@ class VideoPlaybackController(
     /** Uses persisted metadata and completed cache entries only; never resolves a remote URL. */
     fun loadOfflineDownload(downloadId: String, resumePositionMs: Long = 0L): EpisodeSwitchResult {
         if (released || isLoading || !isOffline) return EpisodeSwitchResult.Unavailable
-        val entry = offlineCatalog?.get(downloadId) ?: return offlineFailure()
+        val catalog = offlineCatalog ?: return offlineFailure()
+        val entry = catalog.get(downloadId) ?: return offlineFailure()
         if (entry.detail.mediaKey != requestedMediaKey) return offlineFailure()
-        val completed = offlineCatalog?.completed(entry.detail.mediaKey).orEmpty().sortedBy { it.episodeOrder }
+        val completed = catalog.completed(entry.detail.mediaKey).sortedBy { it.episodeOrder }
         if (completed.none { it.id == downloadId }) return offlineFailure()
-        val snapshot = entry.detail.copy(episodes = completed.map { it.episode }, related = emptyList())
+        val snapshot = (catalog.snapshot(entry.detail.mediaKey) ?: entry.detail).copy(related = emptyList())
         return try {
             val position = AutoSkipPolicy.initialPositionMs(resumePositionMs, entry.episode.opSecond, skipIntro())
             if (prepare(snapshot, entry.episode, position, offlineDownloadId = downloadId)) {

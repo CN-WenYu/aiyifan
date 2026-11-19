@@ -3,19 +3,27 @@ package com.aiyifan.app.core.ui
 import android.app.Activity
 import android.os.Build
 import android.view.View
-import androidx.core.content.ContextCompat
+import androidx.annotation.ColorRes
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
+import com.aiyifan.app.R
 
-fun Activity.setupEdgeToEdge() {
+/** For screens with a surface header and a page background behind the navigation bar. */
+fun Activity.setupPageSystemBars() {
+    // Before Android 8 navigation icons are always white.
+    val needsDarkBackdrop = Build.VERSION.SDK_INT < Build.VERSION_CODES.O &&
+        usesLightSystemBarIcons(resources.configuration.uiMode)
+    setupEdgeToEdge(navigationBarBackground = if (needsDarkBackdrop) android.R.color.black else R.color.page_bg)
+}
+
+fun Activity.setupEdgeToEdge(@ColorRes navigationBarBackground: Int = R.color.surface) {
     val lightSystemBars = usesLightSystemBarIcons(resources.configuration.uiMode)
-    val surfaceColor = ContextCompat.getColor(this, com.aiyifan.app.R.color.surface)
     WindowCompat.setDecorFitsSystemWindows(window, false)
-    window.statusBarColor = surfaceColor
-    window.navigationBarColor = surfaceColor
+    window.statusBarColor = getColor(R.color.surface)
+    window.navigationBarColor = getColor(navigationBarBackground)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         window.isStatusBarContrastEnforced = false
         window.isNavigationBarContrastEnforced = false

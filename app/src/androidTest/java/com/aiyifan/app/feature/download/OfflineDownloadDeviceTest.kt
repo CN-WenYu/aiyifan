@@ -2,11 +2,13 @@ package com.aiyifan.app.feature.download
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.view.View
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.aiyifan.app.R
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.data.CatalogRepository
@@ -237,6 +239,61 @@ class OfflineDownloadDeviceTest {
                 AppGraph.catalogRepository.removeHistory(setOf("offline-device-fixture"))
                 repository.setMobileDataAllowed(previousNetwork)
             }
+        }
+    }
+
+    @Test
+    fun batchButtonsPauseAndResumeMixedQueueAcrossRecreation() = runBlocking<Unit> {
+        // Hold source preparation so queued tasks cannot finish before the UI is exercised.
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val repository = withContext(Dispatchers.Main) {
+            OfflineDownloadRepository(context, object : CatalogRepository by FakeCatalogRepository() {
+                override suspend fun resolveDownload(detail: VideoDetail, episode: Episode): Episode {
+                    gate.await()
+                    return episode
+                }
+            })
+        }
+        val episodes = (1..4).map { Episode("batch-$it", "第 $it 集", it, null) }
+        val detail = VideoDetail("batch-fixture", "批量任务", "", 1, episodes = episodes)
+        val ids = episodes.map { downloadId(detail.mediaKey, it.episodeKey) }
+        withContext(Dispatchers.Main) { repository.awaitLoaded() }
+        org.junit.Assume.assumeTrue("Batch controls require an isolated queue", repository.tasks.value.isEmpty())
+        try {
+            withContext(Dispatchers.Main) {
+                episodes.forEach { repository.enqueue(detail, it) }
+                repository.pause(ids.last())
+            }
+            await { repository.get(ids.last())?.download?.state == Download.STATE_STOPPED }
+            ActivityScenario.launch(DownloadsActivity::class.java).use { scenario ->
+                withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
+                scenario.onActivity {
+                    val tabs = it.findViewById<com.google.android.material.tabs.TabLayout>(R.id.tabs)
+                    tabs.getTabAt(1)!!.select()
+                    assertFalse(it.findViewById<View>(R.id.batchActions).isShown)
+                    tabs.getTabAt(0)!!.select()
+                    assertTrue(it.findViewById<View>(R.id.batchActions).isShown)
+                    assertTrue(it.findViewById<View>(R.id.resumeAllButton).isEnabled)
+                    assertTrue(it.findViewById<View>(R.id.pauseAllButton).performClick())
+                }
+                await { ids.all { repository.get(it)?.download?.stopReason == OfflineDownloadRepository.STOP_REASON_USER } }
+                scenario.recreate()
+                withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
+                scenario.onActivity { assertFalse(it.findViewById<View>(R.id.pauseAllButton).isEnabled) }
+                screenshot("downloads-all-paused.png")
+                scenario.onActivity { assertTrue(it.findViewById<View>(R.id.resumeAllButton).performClick()) }
+                await { ids.all { repository.get(it)?.download?.stopReason == Download.STOP_REASON_NONE } }
+                withContext(Dispatchers.Main) { AppGraph.downloadRepository.awaitLoaded() }
+                scenario.onActivity { assertTrue(it.findViewById<View>(R.id.pauseAllButton).isEnabled) }
+                withContext(Dispatchers.Main) {
+                    ids.forEach { repository.remove(it) }
+                    AppGraph.downloadRepository.awaitLoaded()
+                }
+                scenario.onActivity { assertFalse(it.findViewById<View>(R.id.batchActions).isShown) }
+            }
+        } finally {
+            withContext(Dispatchers.Main) { ids.filter { repository.get(it) != null }.forEach { repository.remove(it) } }
+            gate.cancel()
         }
     }
 

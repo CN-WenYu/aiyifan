@@ -1,14 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<TextView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/episodeTitle"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="@dimen/dp_48"
+    android:layout_height="@dimen/dp_56"
     android:layout_marginEnd="@dimen/dp_8"
     android:layout_marginBottom="@dimen/dp_8"
-    android:maxLines="1"
-    android:ellipsize="end"
-    android:paddingHorizontal="@dimen/dp_4"
     android:background="@drawable/bg_chip"
     android:gravity="center"
-    android:textColor="@color/text_primary"
-    android:textSize="@dimen/sp_13" />
+    android:orientation="vertical"
+    android:paddingHorizontal="@dimen/dp_4">
+
+    <TextView
+        android:id="@+id/episodeTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/sp_13" />
+
+    <TextView
+        android:id="@+id/episodeState"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/text_secondary"
+        android:textSize="@dimen/sp_10"
+        android:visibility="gone" />
+</LinearLayout>

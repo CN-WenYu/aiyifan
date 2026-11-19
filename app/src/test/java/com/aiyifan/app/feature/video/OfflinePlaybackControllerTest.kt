@@ -84,6 +84,40 @@ class OfflinePlaybackControllerTest {
         assertEquals("three", controller.requestedOfflineDownloadId)
     }
 
+    @Test fun `offline session keeps full catalog and resolves missing episode online`() = runBlocking {
+        val online = second.copy(mediaUrl = "https://valid/second.m3u8")
+        val repository = object : CatalogRepository by FakeCatalogRepository() {
+            override suspend fun resolvePlayback(detail: VideoDetail, episode: Episode, forceRefresh: Boolean): Episode = online
+        }
+        val engine = Engine()
+        val controller = controller(engine, repository, fullDetail = detail)
+
+        controller.openVideo("video", "one")
+        assertTrue(controller.loadOfflineDownload("one") is EpisodeSwitchResult.Switched)
+        assertEquals(listOf(first, second, third), controller.activeSession!!.detail.episodes)
+
+        assertTrue(controller.switchEpisode(1) is EpisodeSwitchResult.Switched)
+        assertEquals("second", controller.activeSession!!.episode.episodeKey)
+        assertEquals(0, engine.offlineRequests.count { it == "second" })
+        assertEquals(online.mediaUrl, engine.onlineUrls.last())
+    }
+
+    @Test fun `automatic advance pauses after missing episode fails to load`() = runBlocking {
+        val repository = object : CatalogRepository by FakeCatalogRepository() {
+            override suspend fun resolvePlayback(detail: VideoDetail, episode: Episode, forceRefresh: Boolean): Episode =
+                error("network unavailable")
+        }
+        val engine = Engine().apply { isPlaying = true; hasEnded = true }
+        val controller = controller(engine, repository, fullDetail = detail)
+
+        controller.openVideo("video", "one")
+        controller.loadOfflineDownload("one")
+        engine.hasEnded = true
+        assertEquals(EpisodeSwitchResult.Failed, controller.advanceToNextEpisodeIfEnded())
+        assertFalse(engine.isPlaying)
+        assertEquals("first", controller.activeSession!!.episode.episodeKey)
+    }
+
     @Test fun `removal releases only matching active download without instantiating provider`() {
         var creates = 0
         val engine = Engine()
@@ -100,11 +134,16 @@ class OfflinePlaybackControllerTest {
         assertEquals(1, engine.releases)
     }
 
-    private fun controller(engine: Engine, repository: CatalogRepository = FakeCatalogRepository()) = VideoPlaybackController(
+    private fun controller(
+        engine: Engine,
+        repository: CatalogRepository = FakeCatalogRepository(),
+        fullDetail: VideoDetail = detail.copy(episodes = entries.map { it.episode }.sortedBy { it.uniqueId }),
+    ) = VideoPlaybackController(
         engine, repository, object : PlaybackSession { override fun release() = Unit },
         offlineCatalog = object : OfflinePlaybackCatalog {
             override fun get(id: String) = entries.firstOrNull { it.id == id }
             override fun completed(mediaKey: String) = entries.filter { it.detail.mediaKey == mediaKey }
+            override fun snapshot(mediaKey: String) = fullDetail
         },
     )
 
@@ -118,7 +157,8 @@ class OfflinePlaybackControllerTest {
         var releases = 0
         var rejectOffline = false
         val offlineRequests = mutableListOf<String>()
-        override fun setMediaUrl(mediaUrl: String) { onlineRequests++ }
+        val onlineUrls = mutableListOf<String>()
+        override fun setMediaUrl(mediaUrl: String) { onlineRequests++; onlineUrls += mediaUrl }
         override fun setOfflineMedia(downloadId: String) {
             if (rejectOffline) error("cache missing")
             hasEnded = false

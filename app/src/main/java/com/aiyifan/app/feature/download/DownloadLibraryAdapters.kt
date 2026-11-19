@@ -88,7 +88,7 @@ internal class DownloadFilmAdapter(
             previews.removeAllViews()
             film.episodes.take(6).forEach { item ->
                 val chip = ItemDownloadEpisodeBinding.inflate(LayoutInflater.from(context), previews, false)
-                chip.root.layoutParams = LinearLayout.LayoutParams(context.dp(88), context.dp(56)).apply { marginEnd = context.dp(6) }
+                chip.root.layoutParams = LinearLayout.LayoutParams(context.dp(72), context.dp(44)).apply { marginEnd = context.dp(4) }
                 bindLibraryEpisode(chip, item, managing = false, selected = false) { item.downloadId?.let(episode) }
                 previews.addView(chip.root)
             }
@@ -96,22 +96,35 @@ internal class DownloadFilmAdapter(
     }
 }
 
-internal fun bindLibraryEpisode(binding: ItemDownloadEpisodeBinding, episode: LibraryEpisode, managing: Boolean, selected: Boolean, click: () -> Unit) {
+internal fun bindLibraryEpisode(
+    binding: ItemDownloadEpisodeBinding,
+    episode: LibraryEpisode,
+    managing: Boolean,
+    selected: Boolean,
+    allowUnavailableClick: Boolean = false,
+    click: () -> Unit,
+) {
     val context = binding.root.context
     val available = episode.state == LibraryEpisodeState.DOWNLOADED
+    val clickable = available || allowUnavailableClick && episode.state == LibraryEpisodeState.NOT_DOWNLOADED
     binding.episodeTitle.text = episode.episode.episodeTitle
-    binding.episodeState.setText(episode.state.label())
+    binding.episodeState.text = episode.watchPercent?.let { context.getString(R.string.download_library_watched_percent, it) }
+        ?: context.getString(episode.state.label())
     binding.episodeState.setTextColor(context.getColor(if (available) R.color.accent else R.color.text_secondary))
     binding.root.isCheckable = managing
     binding.root.isChecked = selected
     binding.root.strokeWidth = context.dp(if (selected) 2 else 1)
     binding.root.setStrokeColor(context.getColor(if (selected) R.color.accent else R.color.outline))
     binding.root.setCardBackgroundColor(context.getColor(if (selected) R.color.chip_selected else R.color.field_bg))
-    binding.root.isEnabled = available
-    binding.root.isClickable = available
+    binding.root.isEnabled = clickable
+    binding.root.isClickable = clickable
     binding.root.isFocusable = true
-    binding.root.contentDescription = "${episode.episode.episodeTitle}，${context.getString(episode.state.label())}"
-    binding.root.setOnClickListener { if (available) click() }
+    binding.root.contentDescription = listOfNotNull(
+        episode.episode.episodeTitle,
+        episode.watchPercent?.let { context.getString(R.string.download_library_watched_percent, it) },
+        context.getString(episode.state.label()),
+    ).joinToString("，")
+    binding.root.setOnClickListener { if (clickable) click() }
 }
 
 internal fun LibraryEpisodeState.label(): Int = when (this) {

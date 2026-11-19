@@ -9,6 +9,18 @@
     <androidx.appcompat.widget.SwitchCompat android:id="@+id/mobileDataSwitch" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp" android:paddingHorizontal="16dp" android:text="@string/download_mobile_allowed" android:textColor="@color/text_primary" />
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="16dp" android:paddingBottom="8dp" android:text="@string/download_network_hint" android:textSize="12sp" android:textColor="@color/text_secondary" />
     <com.google.android.material.tabs.TabLayout android:id="@+id/tabs" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" app:tabTextColor="@color/text_secondary" app:tabSelectedTextColor="@color/accent" app:tabIndicatorColor="@color/accent" />
+    <LinearLayout android:id="@+id/batchActions" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="end|center_vertical" android:paddingHorizontal="12dp"
+        android:background="@color/surface" android:visibility="gone">
+        <com.google.android.material.button.MaterialButton android:id="@+id/pauseAllButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
+            android:text="@string/download_pause_all" android:textColor="@color/download_queue_action_text" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/resumeAllButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="48dp"
+            android:text="@string/download_resume_all" android:textColor="@color/download_queue_action_text" />
+    </LinearLayout>
     <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/recycler" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="16dp" android:clipToPadding="false" />
         <TextView android:id="@+id/emptyView" android:layout_width="match_parent" android:layout_height="match_parent" android:padding="32dp" android:gravity="center" android:textColor="@color/text_secondary" android:textSize="15sp" />

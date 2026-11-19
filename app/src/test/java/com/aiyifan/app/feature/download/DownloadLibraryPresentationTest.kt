@@ -6,6 +6,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DownloadLibraryPresentationTest {
+    @Test fun `watch percentage clamps valid progress and omits unknown duration`() {
+        assertEquals(0, watchPercentage(0, 100))
+        assertEquals(65, watchPercentage(650, 1000))
+        assertEquals(100, watchPercentage(1200, 1000))
+        assertNull(watchPercentage(500, 0))
+        assertNull(watchPercentage(-1, 1000))
+    }
+
     @Test fun `byte progress uses measured length not segment percentage`() {
         val progress = downloadProgress(250, 1000, 80f, true)
         assertEquals(25, progress.percent)

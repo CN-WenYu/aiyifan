@@ -27,6 +27,16 @@ class WatchHistoryStoreTest {
     }
 
     @Test
+    fun `memory store keeps independent progress for each episode`() {
+        val store = InMemoryWatchHistoryStore()
+        store.save(history("first", updatedAt = 10))
+        store.save(history("first", updatedAt = 20).copy(episodeKey = "episode-2", progressMs = 800))
+
+        assertEquals(200L, store.getEpisodeHistory("first", "episode-1")?.progressMs)
+        assertEquals(800L, store.getEpisodeHistory("first", "episode-2")?.progressMs)
+    }
+
+    @Test
     fun `invalid save cannot replace a valid history record`() {
         val store = InMemoryWatchHistoryStore()
         val valid = history()
@@ -101,6 +111,19 @@ class WatchHistoryStoreTest {
         assertEquals(listOf(record), restored.getHistory())
         restored.clear()
         assertTrue(SharedPreferencesWatchHistoryStore(preferences).getHistory().isEmpty())
+    }
+
+    @Test
+    fun `preferences store persists progress for multiple episodes of one media`() {
+        val preferences = memoryPreferences()
+        val store = SharedPreferencesWatchHistoryStore(preferences)
+        store.save(history("video").copy(episodeKey = "episode-1", progressMs = 100))
+        store.save(history("video").copy(episodeKey = "episode-2", progressMs = 900, updatedAt = 200))
+
+        val restored = SharedPreferencesWatchHistoryStore(preferences)
+        assertEquals(100L, restored.getEpisodeHistory("video", "episode-1")?.progressMs)
+        assertEquals(900L, restored.getEpisodeHistory("video", "episode-2")?.progressMs)
+        assertEquals("episode-2", restored.getHistory().single().episodeKey)
     }
 
     @Test

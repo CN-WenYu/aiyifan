@@ -11,6 +11,7 @@ import com.aiyifan.app.core.model.VideoDetail
 interface OfflinePlaybackCatalog {
     fun get(id: String): OfflinePlaybackEntry?
     fun completed(mediaKey: String): List<OfflinePlaybackEntry>
+    fun snapshot(mediaKey: String): VideoDetail? = null
 }
 
 data class OfflinePlaybackEntry(
@@ -33,4 +34,6 @@ internal class RepositoryOfflinePlaybackCatalog(
 
     override fun completed(mediaKey: String): List<OfflinePlaybackEntry> =
         repository.completed(mediaKey).mapNotNull { get(it.id) }.sortedBy { it.episodeOrder }
+
+    override fun snapshot(mediaKey: String): VideoDetail? = repository.filmSnapshot(mediaKey)
 }

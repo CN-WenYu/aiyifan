@@ -10,6 +10,8 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.aiyifan.app.R
+import com.aiyifan.app.core.model.Episode
+import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.usesLightSystemBarIcons
 import com.aiyifan.app.databinding.ItemDownloadEpisodeBinding
@@ -24,6 +26,7 @@ internal class DownloadLibrarySheet(
     val mediaKey: String,
     private val managing: Boolean,
     private val play: (String) -> Unit,
+    private val enqueue: (VideoDetail, Episode) -> Unit,
     private val remove: (List<String>) -> Unit,
     private val onDismiss: () -> Unit,
 ) {
@@ -94,6 +97,7 @@ internal class DownloadLibrarySheet(
 
     fun update(film: DownloadFilm?) {
         if (film == null) { dialog.dismiss(); return }
+        filmDetail = film.detail
         episodes = if (managing) film.episodes.filter { it.state == LibraryEpisodeState.DOWNLOADED } else film.episodes
         selected.retainAll(episodes.mapNotNull { it.downloadId }.toSet())
         binding.episodeCount.text = activity.getString(R.string.download_episode_count, episodes.size)
@@ -118,18 +122,32 @@ internal class DownloadLibrarySheet(
             EpisodeHolder(ItemDownloadEpisodeBinding.inflate(LayoutInflater.from(parent.context), parent, false))
         override fun onBindViewHolder(holder: EpisodeHolder, position: Int) {
             val item = episodes[position]
-            bindLibraryEpisode(holder.binding, item, managing, item.downloadId in selected) {
-                val id = item.downloadId ?: return@bindLibraryEpisode
+            bindLibraryEpisode(
+                holder.binding,
+                item,
+                managing,
+                item.downloadId in selected,
+                allowUnavailableClick = !managing,
+            ) {
                 if (managing) {
+                    val id = item.downloadId ?: return@bindLibraryEpisode
                     if (!selected.add(id)) selected.remove(id)
                     renderSelection()
                 } else {
-                    dialog.dismiss()
-                    play(id)
+                    when (item.state) {
+                        LibraryEpisodeState.DOWNLOADED -> item.downloadId?.let {
+                            dialog.dismiss()
+                            play(it)
+                        }
+                        LibraryEpisodeState.NOT_DOWNLOADED -> filmDetail?.let { enqueue(it, item.episode) }
+                        else -> Unit
+                    }
                 }
             }
         }
     }
+
+    private var filmDetail: VideoDetail? = null
 
     private class EpisodeHolder(val binding: ItemDownloadEpisodeBinding) : RecyclerView.ViewHolder(binding.root)
 }

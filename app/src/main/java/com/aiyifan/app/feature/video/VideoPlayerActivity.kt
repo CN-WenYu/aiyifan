@@ -440,7 +440,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
             EpisodeSwitchResult.Failed -> {
                 resetFullscreenLock()
-                if (playbackController.isOffline) showOfflinePlaybackError()
+                if (playbackController.hasOfflinePlaybackError) showOfflinePlaybackError()
                 else Toast.makeText(this, R.string.video_stream_load_failed, Toast.LENGTH_SHORT).show()
             }
             EpisodeSwitchResult.Unavailable -> Unit
@@ -779,10 +779,18 @@ class VideoPlayerActivity : AppCompatActivity() {
         selectedEpisode = playbackController.pendingEpisode
             ?.takeIf { playbackController.requestedMediaKey == currentDetail.mediaKey }
             ?: session?.episode
-        episodeAdapter.submitList(currentDetail.episodes, selectedEpisode, enabled = !playbackController.isLoading)
+        val downloadedEpisodeKeys = if (playbackController.isOffline) {
+            AppGraph.downloadRepository.completed(currentDetail.mediaKey).mapTo(mutableSetOf()) { it.metadata!!.episode.episodeKey }
+        } else null
+        episodeAdapter.submitList(
+            currentDetail.episodes,
+            selectedEpisode,
+            enabled = !playbackController.isLoading,
+            downloadedEpisodeKeys = downloadedEpisodeKeys,
+        )
         // ScrollView can give wrap_content RecyclerViews a viewport-sized measurement.
         // Reserve every grid row so the parent scrolls the complete episode list.
-        val rowHeight = resources.getDimensionPixelSize(R.dimen.dp_48) +
+        val rowHeight = resources.getDimensionPixelSize(R.dimen.dp_56) +
             resources.getDimensionPixelSize(R.dimen.dp_8)
         val gridHeight = ((currentDetail.episodes.size + 3) / 4) * rowHeight
         if (binding.episodeRecycler.layoutParams.height != gridHeight) {

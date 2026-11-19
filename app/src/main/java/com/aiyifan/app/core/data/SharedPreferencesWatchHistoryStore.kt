@@ -9,25 +9,30 @@ class SharedPreferencesWatchHistoryStore(
     override fun save(history: WatchHistory) {
         if (!history.isValid()) return
         synchronized(preferences) {
-            val records = InMemoryWatchHistoryStore()
-            getHistory().forEach(records::save)
-            records.save(history)
-            preferences.edit().putString(HISTORY_KEY, WatchHistoryCodec.encode(records.getHistory())).apply()
+            val records = (readAll() + history)
+                .filter { it.isValid() }
+                .groupBy { recordKey(it.mediaKey, it.episodeKey) }
+                .values
+                .map { values -> values.maxBy { it.updatedAt } }
+            preferences.edit().putString(HISTORY_KEY, WatchHistoryCodec.encode(records)).apply()
         }
     }
 
     override fun getHistory(): List<WatchHistory> = synchronized(preferences) {
-        val payload = try {
-            preferences.getString(HISTORY_KEY, null)
-        } catch (_: ClassCastException) {
-            null
+        readAll().let { records ->
+            val store = InMemoryWatchHistoryStore()
+            records.forEach(store::save)
+            store.getHistory()
         }
-        WatchHistoryCodec.decode(payload)
+    }
+
+    override fun getEpisodeHistory(mediaKey: String, episodeKey: String): WatchHistory? = synchronized(preferences) {
+        readAll().firstOrNull { it.mediaKey == mediaKey && it.episodeKey == episodeKey }
     }
 
     override fun remove(mediaKeys: Set<String>) {
         synchronized(preferences) {
-            val remaining = getHistory().filterNot { it.mediaKey in mediaKeys }
+            val remaining = readAll().filterNot { it.mediaKey in mediaKeys }
             preferences.edit().putString(HISTORY_KEY, WatchHistoryCodec.encode(remaining)).apply()
         }
     }
@@ -41,4 +46,10 @@ class SharedPreferencesWatchHistoryStore(
     private companion object {
         const val HISTORY_KEY = "watch_history"
     }
+
+    private fun readAll(): List<WatchHistory> {
+        val payload = try { preferences.getString(HISTORY_KEY, null) } catch (_: ClassCastException) { null }
+        return WatchHistoryCodec.decodeAll(payload)
+    }
+
 }
