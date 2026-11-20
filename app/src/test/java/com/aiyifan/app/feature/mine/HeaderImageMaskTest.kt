@@ -1,8 +1,6 @@
 package com.aiyifan.app.feature.mine
 
 import android.app.Application
-import android.content.Intent
-import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
 import android.view.MotionEvent
@@ -11,7 +9,6 @@ import com.aiyifan.app.R
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
@@ -20,15 +17,10 @@ import java.time.Duration
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [28, 35])
 class HeaderImageMaskTest {
-    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
-    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     @Test fun `single taps toggle mask double tap does not and recreation restores state`() {
-        val controller = Robolectric.buildActivity(HeaderImageActivity::class.java,
-            Intent().putExtra(HeaderImageActivity.EXTRA_IMAGE, "mine_header_001.webp"))
-        controller.get().setTheme(R.style.AppTheme)
-        controller.setup().visible()
-        fun mask() = controller.get().window.decorView.findViewWithTag<View>("header_image_mask")
-        fun image() = controller.get().window.decorView.findViewWithTag<ZoomImageView>("header_zoom_image")
+        val controller = openHeaderImageSheet()
+        fun mask() = controller.get().imageSheet().requireView().findViewWithTag<View>("header_image_mask")
+        fun image() = controller.get().imageSheet().requireView().findViewWithTag<ZoomImageView>("header_zoom_image")
         fun tap() {
             val now = SystemClock.uptimeMillis()
             for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
@@ -37,8 +29,8 @@ class HeaderImageMaskTest {
             }
         }
         try {
-            val download = controller.get().window.decorView.findViewWithTag<View>("header_image_download")
-            assertNotNull("Full-screen viewer needs a save button", download)
+            val download = controller.get().imageSheet().requireView().findViewWithTag<View>("header_image_download")
+            assertNotNull("Image preview needs a save button", download)
             assertEquals(controller.get().resources.getDimensionPixelSize(R.dimen.dp_48), download.layoutParams.width)
             assertTrue(download.contentDescription.isNotBlank())
             assertNotNull(mask())
@@ -60,11 +52,8 @@ class HeaderImageMaskTest {
             controller.recreate()
             assertEquals(View.GONE, mask().visibility)
         } finally { controller.pause().stop().destroy() }
-        val fresh = Robolectric.buildActivity(HeaderImageActivity::class.java,
-            Intent().putExtra(HeaderImageActivity.EXTRA_IMAGE, "mine_header_001.webp"))
-        fresh.get().setTheme(R.style.AppTheme)
-        fresh.setup()
-        try { assertEquals(View.VISIBLE, fresh.get().window.decorView.findViewWithTag<View>("header_image_mask").visibility) }
+        val fresh = openHeaderImageSheet()
+        try { assertEquals(View.VISIBLE, fresh.get().imageSheet().requireView().findViewWithTag<View>("header_image_mask").visibility) }
         finally { fresh.pause().stop().destroy() }
     }
 }

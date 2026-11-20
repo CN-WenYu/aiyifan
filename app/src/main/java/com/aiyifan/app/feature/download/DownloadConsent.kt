@@ -9,7 +9,8 @@ import com.aiyifan.app.core.data.AppGraph
 import android.view.ViewGroup
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.isVisible
-import com.aiyifan.app.core.ui.applySystemBarsPadding
+import com.aiyifan.app.core.ui.createAppBottomSheet
+import com.aiyifan.app.core.ui.setAppSheetContent
 import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.SheetDownloadSelectionBinding
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -23,12 +24,9 @@ internal fun AppCompatActivity.confirmDownloadNetwork(ids: Set<String>, eligible
         start(false)
         return
     }
-    val dialog = BottomSheetDialog(this, R.style.ThemeOverlay_Aiyifan_DownloadSheet)
-    val binding = SheetDownloadSelectionBinding.inflate(layoutInflater)
-    dialog.setContentView(binding.root)
-    binding.root.applySystemBarsPadding(left = true, right = true, bottom = true)
-    dialog.behavior.maxWidth = dp(640)
-    dialog.behavior.setShouldRemoveExpandedCorners(false)
+    val dialog = createAppBottomSheet()
+    val binding = SheetDownloadSelectionBinding.inflate(dialog.layoutInflater)
+    dialog.setAppSheetContent(binding.root)
     bindDownloadConsent(binding, dialog, ids, eligible, start)
     dialog.show()
     dialog.window?.setupPageSystemBars()

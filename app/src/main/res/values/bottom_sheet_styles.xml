@@ -1,15 +1,15 @@
 <resources>
-    <style name="ThemeOverlay.Aiyifan.DownloadSheet" parent="ThemeOverlay.MaterialComponents.BottomSheetDialog">
-        <item name="bottomSheetStyle">@style/Widget.Aiyifan.DownloadSheet</item>
+    <style name="ThemeOverlay.Aiyifan.BottomSheet" parent="ThemeOverlay.MaterialComponents.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.Aiyifan.BottomSheet</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="enableEdgeToEdge">true</item>
     </style>
-    <style name="Widget.Aiyifan.DownloadSheet" parent="Widget.MaterialComponents.BottomSheet.Modal">
+    <style name="Widget.Aiyifan.BottomSheet" parent="Widget.MaterialComponents.BottomSheet.Modal">
         <item name="backgroundTint">@color/surface</item>
-        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.Aiyifan.DownloadSheet</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.Aiyifan.BottomSheet</item>
         <item name="paddingBottomSystemWindowInsets">false</item>
     </style>
-    <style name="ShapeAppearance.Aiyifan.DownloadSheet" parent="">
+    <style name="ShapeAppearance.Aiyifan.BottomSheet" parent="">
         <item name="cornerFamily">rounded</item>
         <item name="cornerSizeTopLeft">@dimen/dialog_panel_radius</item>
         <item name="cornerSizeTopRight">@dimen/dialog_panel_radius</item>

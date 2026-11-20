@@ -5,7 +5,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.content.ContentProvider
 import android.content.ContentValues
-import android.content.Intent
 import android.content.pm.ProviderInfo
 import android.database.Cursor
 import android.net.Uri
@@ -20,7 +19,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Robolectric
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
@@ -33,8 +31,6 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35])
 class HeaderImageSaverTest {
-    @org.junit.Before fun enableOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = com.aiyifan.app.core.startup.AppMode.ONLINE }
-    @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     private val context get() = RuntimeEnvironment.getApplication()
     private lateinit var provider: GalleryProvider
 
@@ -79,20 +75,17 @@ class HeaderImageSaverTest {
 
     @Test fun `save survives viewer recreation and rejects duplicate requests`() {
         provider.allowWrite = CountDownLatch(1)
-        val controller = Robolectric.buildActivity(HeaderImageActivity::class.java,
-            Intent().putExtra(HeaderImageActivity.EXTRA_IMAGE, "mine_header_001.webp"))
-        controller.get().setTheme(R.style.AppTheme)
-        controller.setup().visible()
-        fun button() = controller.get().window.decorView.findViewWithTag<View>("header_image_download")
+        val controller = openHeaderImageSheet()
+        fun button() = controller.get().imageSheet().requireView().findViewWithTag<View>("header_image_download")
         try {
             button().performClick()
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue(provider.writeStarted.await(5, TimeUnit.SECONDS))
-            val model = ViewModelProvider(controller.get())[HeaderImageSaveViewModel::class.java]
+            val model = ViewModelProvider(controller.get().imageSheet())[HeaderImageSaveViewModel::class.java]
             assertFalse(button().isEnabled)
             model.save(context, "mine_header_001.webp")
             controller.recreate()
-            assertSame(model, ViewModelProvider(controller.get())[HeaderImageSaveViewModel::class.java])
+            assertSame(model, ViewModelProvider(controller.get().imageSheet())[HeaderImageSaveViewModel::class.java])
             assertFalse(button().isEnabled)
             provider.allowWrite!!.countDown()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
@@ -120,12 +113,9 @@ class HeaderImageSaverTest {
     }
 
     @Test @Config(sdk = [28]) fun `legacy permission denial does not save an image`() {
-        val controller = Robolectric.buildActivity(HeaderImageActivity::class.java,
-            Intent().putExtra(HeaderImageActivity.EXTRA_IMAGE, "mine_header_001.webp"))
-        controller.get().setTheme(R.style.AppTheme)
-        controller.setup().visible()
+        val controller = openHeaderImageSheet()
         try {
-            controller.get().window.decorView.findViewWithTag<View>("header_image_download").performClick()
+            controller.get().imageSheet().requireView().findViewWithTag<View>("header_image_download").performClick()
             val request = shadowOf(controller.get()).lastRequestedPermission
             assertArrayEquals(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), request.requestedPermissions)
             controller.get().onRequestPermissionsResult(request.requestCode, request.requestedPermissions,

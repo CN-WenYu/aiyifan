@@ -6,7 +6,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import com.aiyifan.app.R
 import com.aiyifan.app.databinding.DialogDestructiveConfirmationBinding
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 internal fun AppCompatActivity.showDestructiveConfirmation(
     @StringRes title: Int,
@@ -14,15 +13,14 @@ internal fun AppCompatActivity.showDestructiveConfirmation(
     @StringRes action: Int,
     onConfirm: () -> Unit,
 ) {
-    val builder = MaterialAlertDialogBuilder(this)
-        .setBackground(getDrawable(R.drawable.bg_confirmation_panel))
-    val binding = DialogDestructiveConfirmationBinding.inflate(LayoutInflater.from(builder.context))
+    val dialog = createAppBottomSheet()
+    val binding = DialogDestructiveConfirmationBinding.inflate(LayoutInflater.from(dialog.context))
     binding.title.setText(title)
     ViewCompat.setAccessibilityHeading(binding.title, true)
     binding.message.text = message
     binding.confirmButton.setText(action)
 
-    val dialog = builder.setView(binding.root).create()
+    dialog.setAppSheetContent(binding.root)
     binding.cancelButton.setOnClickListener { dialog.dismiss() }
     binding.confirmButton.setOnClickListener {
         dialog.dismiss()

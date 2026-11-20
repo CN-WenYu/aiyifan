@@ -12,12 +12,11 @@ import com.aiyifan.app.R
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.ui.showDestructiveConfirmation
-import com.aiyifan.app.core.ui.applySystemBarsPadding
+import com.aiyifan.app.core.ui.createAppBottomSheet
+import com.aiyifan.app.core.ui.setAppSheetContent
 import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.ItemDownloadEpisodeBinding
 import com.aiyifan.app.databinding.SheetDownloadSelectionBinding
-import com.google.android.material.bottomsheet.BottomSheetBehavior
-import com.google.android.material.bottomsheet.BottomSheetDialog
 
 /** Reads only the current library snapshot; never resolves remote details or playback sources. */
 internal class DownloadLibrarySheet(
@@ -28,7 +27,7 @@ internal class DownloadLibrarySheet(
     private val remove: (List<String>) -> Unit,
     private val onDismiss: () -> Unit,
 ) {
-    private val dialog = BottomSheetDialog(activity, R.style.ThemeOverlay_Aiyifan_DownloadSheet)
+    private val dialog = activity.createAppBottomSheet()
     private val binding = SheetDownloadSelectionBinding.inflate(LayoutInflater.from(dialog.context))
     private var managing = false
     private val selected = linkedSetOf<String>()
@@ -39,15 +38,9 @@ internal class DownloadLibrarySheet(
     }
 
     fun show(film: DownloadFilm) {
-        dialog.setContentView(binding.root)
+        dialog.setAppSheetContent(binding.root)
         binding.root.layoutParams.height = (activity.resources.displayMetrics.heightPixels * 0.75f).toInt()
-        binding.root.applySystemBarsPadding(left = true, right = true, bottom = true)
-        dialog.behavior.apply {
-            maxWidth = activity.dp(640)
-            skipCollapsed = true
-            setShouldRemoveExpandedCorners(false)
-            state = BottomSheetBehavior.STATE_EXPANDED
-        }
+
         binding.videoTitle.text = film.detail.title
         binding.closeButton.contentDescription = activity.getString(R.string.download_library_close)
         binding.closeButton.setOnClickListener { dialog.dismiss() }

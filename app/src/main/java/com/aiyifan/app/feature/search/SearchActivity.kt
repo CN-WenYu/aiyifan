@@ -12,7 +12,6 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
@@ -20,6 +19,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.VideoSummary
+import com.aiyifan.app.core.ui.showDestructiveConfirmation
 import com.aiyifan.app.core.ui.SearchPageState
 import com.aiyifan.app.core.ui.SearchResultAdapter
 import com.aiyifan.app.core.ui.SearchSuggestionAdapter
@@ -252,16 +252,16 @@ class SearchActivity : AppCompatActivity() {
     }
 
     private fun confirmClearHistory() {
-        AlertDialog.Builder(this)
-            .setMessage("确定清空全部搜索历史吗？")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("清空") { _, _ ->
-                historyPrefs.edit().remove(HISTORY_KEY).remove(LEGACY_HISTORY_KEY).apply()
-                historyExpanded = false
-                renderHistory()
-                Toast.makeText(this, "搜索历史已清空", Toast.LENGTH_SHORT).show()
-            }
-            .show()
+        showDestructiveConfirmation(
+            R.string.search_history_clear_title,
+            getString(R.string.search_history_clear_message),
+            R.string.search_history_clear_action,
+        ) {
+            historyPrefs.edit().remove(HISTORY_KEY).remove(LEGACY_HISTORY_KEY).apply()
+            historyExpanded = false
+            renderHistory()
+            Toast.makeText(this, R.string.search_history_cleared, Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onDestroy() {

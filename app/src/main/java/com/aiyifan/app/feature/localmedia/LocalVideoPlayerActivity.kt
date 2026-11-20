@@ -17,12 +17,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.aiyifan.app.R
 import com.aiyifan.app.core.ui.applySystemBarsPadding
+import com.aiyifan.app.feature.video.PlayerSettingsSheet
 import com.aiyifan.app.core.ui.FullscreenLockState
 import com.aiyifan.app.core.ui.PlaybackScreenAwakeController
 import com.aiyifan.app.core.ui.ScreenOffPlaybackObserver
@@ -111,7 +111,11 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
             renderFullscreenLock()
             binding.localPlayerView.showController()
         }
-        binding.localSpeedButton.setOnClickListener { showSpeedDialog() }
+        val settingsSheet = PlayerSettingsSheet(this, binding.localPlayerView)
+        binding.localSpeedButton.setOnClickListener {
+            val speeds = LocalPlayerPositionPolicy.speedOptions
+            settingsSheet.showSpeed(speeds, speeds.map { "%.2fx".format(it) }, R.string.local_media_speed)
+        }
 
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
@@ -231,19 +235,6 @@ class LocalVideoPlayerActivity : AppCompatActivity() {
         resetFullscreenLock()
         binding.localPlayerView.useController = !isInPictureInPictureMode
         if (isInPictureInPictureMode) binding.localPlayerTopBar.isVisible = false
-    }
-
-    private fun showSpeedDialog() {
-        val speeds = LocalPlayerPositionPolicy.speedOptions
-        val labels = speeds.map { "%.2fx".format(it) }.toTypedArray()
-        val current = speeds.indexOfFirst { it == player.playbackParameters.speed }.coerceAtLeast(0)
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.local_media_speed)
-            .setSingleChoiceItems(labels, current) { dialog, which ->
-                player.playbackParameters = PlaybackParameters(speeds[which])
-                dialog.dismiss()
-            }
-            .show()
     }
 
     private fun persistPosition(positionMs: Long) {

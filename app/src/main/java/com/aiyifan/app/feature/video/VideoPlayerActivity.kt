@@ -87,7 +87,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         openingOverlaySettings = false
     }
     private var playerBrightness = -1f
-    private var sleepTimerDialog: androidx.appcompat.app.AlertDialog? = null
+    private var sleepTimerDialog: com.google.android.material.bottomsheet.BottomSheetDialog? = null
     private var restorePipLayout: (() -> Unit)? = null
     private val fullscreenLockState = FullscreenLockState()
     private val unlockPromptHideRunnable = Runnable {
@@ -147,6 +147,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             },
         )
         binding.playerView.setOnTouchListener(PlayerGestureTouchListener())
+        PlayerSettingsSheet(this, binding.playerView)
         binding.playerView.findViewById<ImageButton>(R.id.playerPreviousEpisodeButton).setOnClickListener { switchEpisode(-1) }
         binding.playerView.findViewById<ImageButton>(R.id.playerNextEpisodeButton).setOnClickListener { switchEpisode(1) }
         binding.playerView.findViewById<View>(R.id.playerSleepTimerButton).setOnClickListener { showSleepTimer() }

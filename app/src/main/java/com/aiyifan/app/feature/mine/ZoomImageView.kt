@@ -83,6 +83,7 @@ internal class ZoomImageView(context: Context) : AppCompatImageView(context) {
     // GestureDetector calls performClick from onSingleTapConfirmed above.
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) parent?.requestDisallowInterceptTouchEvent(true)
         scaleGesture.onTouchEvent(event)
         gesture.onTouchEvent(event)
         return true

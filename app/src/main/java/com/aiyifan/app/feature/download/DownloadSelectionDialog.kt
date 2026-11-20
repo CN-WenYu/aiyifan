@@ -18,14 +18,14 @@ import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.model.Episode
-import com.aiyifan.app.core.ui.applySystemBarsPadding
+import com.aiyifan.app.core.ui.createAppBottomSheet
+import com.aiyifan.app.core.ui.setAppSheetContent
 import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.SheetDownloadSelectionBinding
 import com.aiyifan.app.databinding.ItemDownloadEpisodeBinding
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.material.bottomsheet.BottomSheetBehavior
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -42,7 +42,7 @@ object DownloadSelectionDialog {
 
     private class SelectionSheet(private val activity: AppCompatActivity, private val detail: VideoDetail) {
         val repository = AppGraph.downloadRepository
-        private val dialog = BottomSheetDialog(activity, R.style.ThemeOverlay_Aiyifan_DownloadSheet)
+        private val dialog = activity.createAppBottomSheet()
         private val binding = SheetDownloadSelectionBinding.inflate(LayoutInflater.from(dialog.context))
         private val selected = linkedSetOf<String>()
         private var existing = emptyMap<String, Int>()
@@ -61,19 +61,13 @@ object DownloadSelectionDialog {
 
         @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
         fun show(): BottomSheetDialog {
-            dialog.setContentView(binding.root)
+            dialog.setAppSheetContent(binding.root)
             val density = activity.resources.displayMetrics.density
             val windowHeight = activity.window.decorView.height.takeIf { it > 0 }
                 ?: activity.resources.displayMetrics.heightPixels
             val landscape = activity.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
             binding.root.layoutParams.height = (windowHeight * if (landscape) 0.9f else 0.72f).toInt()
-            dialog.behavior.apply {
-                maxWidth = (640 * density).toInt()
-                skipCollapsed = true
-                setShouldRemoveExpandedCorners(false)
-                state = BottomSheetBehavior.STATE_EXPANDED
-            }
-            binding.root.applySystemBarsPadding(left = true, right = true, bottom = true)
+
             binding.videoTitle.text = detail.title
             binding.episodeCount.text = activity.getString(R.string.download_episode_count, detail.episodes.size)
             val grid = GridLayoutManager(activity, 4)

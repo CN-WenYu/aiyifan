@@ -49,7 +49,8 @@ internal class HeaderCarousel(
     private var touching = false
     private var direction = 1
     private var dragOffset = 0f
-    val canExpand get() = running && ready
+    private var viewerOpen = false
+    val canExpand get() = running && ready && !viewerOpen
     private val advance = Runnable {
         if (state.tick(SystemClock.uptimeMillis())) {
             direction = 1
@@ -134,9 +135,21 @@ internal class HeaderCarousel(
     fun prepareViewer(): Int? {
         if (!canExpand) return null
         settleAnimation()
-        val index = state.index
-        stop()
-        return index
+        setViewerOpen(true)
+        return state.index
+    }
+
+    fun setViewerOpen(open: Boolean) {
+        if (viewerOpen == open) return
+        viewerOpen = open
+        if (open) {
+            cancelPendingLoad()
+            handler.removeCallbacks(advance)
+        } else {
+            state.endInteraction(SystemClock.uptimeMillis())
+            schedule()
+        }
+        onChanged()
     }
 
     private fun settleAnimation() {
@@ -287,7 +300,7 @@ internal class HeaderCarousel(
 
     private fun schedule() {
         handler.removeCallbacks(advance)
-        if (running && !touching && ready && !state.paused && !state.exhausted && state.pendingIndex == null) {
+        if (running && !touching && !viewerOpen && ready && !state.paused && !state.exhausted && state.pendingIndex == null) {
             handler.postDelayed(advance, HeaderSlideshow.INTERVAL_MS)
             if (loadingIndex == null && preparedIndex == null) {
                 state.nextCandidate?.let { load(slots[1 - current], it, next = true) }

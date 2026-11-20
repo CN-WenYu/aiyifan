@@ -62,13 +62,14 @@ class HeaderSlideshowDeviceTest {
             awaitImage(scenario)
             scenario.onActivity { assertEquals(index, state(it).index); assertTrue(state(it).paused) }
             repeat(5) {
-                val monitor = instrumentation.addMonitor(HeaderImageActivity::class.java.name, null, false)
                 scenario.onActivity { it.findViewById<ImageButton>(R.id.headerExpand).performClick() }
-                val viewer = instrumentation.waitForMonitorWithTimeout(monitor, 5000)
-                assertNotNull("Viewer must open", viewer)
-                instrumentation.runOnMainSync { viewer.finish() }
-                instrumentation.removeMonitor(monitor)
                 instrumentation.waitForIdleSync()
+                scenario.onActivity {
+                    val mine = it.supportFragmentManager.findFragmentByTag(MineFragment::class.java.name)!!
+                    val viewer = mine.childFragmentManager.findFragmentByTag(HeaderImageSheet.TAG) as? HeaderImageSheet
+                    assertTrue("Viewer must open as a bottom sheet", viewer?.dialog?.isShowing == true)
+                    viewer!!.dismiss()
+                }
                 awaitImage(scenario)
             }
             scenario.onActivity {

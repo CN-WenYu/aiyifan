@@ -44,7 +44,7 @@ class FloatingPlayerService : Service() {
     private var expandedWindowWidth = 0
     private var isClosing = false
     private var offlineErrorShown = false
-    private var sleepTimerDialog: androidx.appcompat.app.AlertDialog? = null
+    private var sleepTimerDialog: com.google.android.material.bottomsheet.BottomSheetDialog? = null
     private var removePositionListener: (() -> Unit)? = null
     private var removeStateListener: (() -> Unit)? = null
     private var controlsVisible = true

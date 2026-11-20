@@ -13,13 +13,13 @@ import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.ui.ThemeMode
 import com.aiyifan.app.core.ui.ThemePreferenceStore
+import com.aiyifan.app.core.ui.createOptionsSheet
 import com.aiyifan.app.databinding.FragmentMineBinding
 import com.aiyifan.app.feature.download.showDownloadCountDialog
 import com.aiyifan.app.feature.collection.CollectionActivity
 import com.aiyifan.app.feature.history.HistoryActivity
 import com.aiyifan.app.feature.hot.HotActivity
 import com.bumptech.glide.Glide
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class MineFragment : Fragment() {
     private var _binding: FragmentMineBinding? = null
@@ -83,6 +83,10 @@ class MineFragment : Fragment() {
             Glide.with(this), images, slideshow, binding.headerImage, binding.headerNextImage,
             { binding.mineHeader.expandedHeightPx }, ::updatePlayback,
         )
+        carousel?.setViewerOpen(childFragmentManager.findFragmentByTag(HeaderImageSheet.TAG) != null)
+        childFragmentManager.setFragmentResultListener(HeaderImageSheet.TAG, viewLifecycleOwner) { _, _ ->
+            carousel?.setViewerOpen(false)
+        }
         binding.mineHeader.listener = object : HeaderGestureLayout.Listener {
             override fun onTouchStart() { carousel?.beginTouch() }
             override fun onHorizontalDrag(offset: Float) { carousel?.drag(offset) }
@@ -92,9 +96,9 @@ class MineFragment : Fragment() {
         windowRoot?.addOnLayoutChangeListener(windowLayoutListener)
         binding.headerPlayback.setOnClickListener { carousel?.togglePause() }
         binding.headerExpand.setOnClickListener {
+            if (childFragmentManager.isStateSaved) return@setOnClickListener
             val index = carousel?.prepareViewer() ?: return@setOnClickListener
-            startActivity(Intent(requireContext(), HeaderImageActivity::class.java)
-                .putExtra(HeaderImageActivity.EXTRA_IMAGE, images[index]))
+            HeaderImageSheet.newInstance(images[index]).show(childFragmentManager, HeaderImageSheet.TAG)
         }
         updatePlayback()
         val themePreferenceStore = ThemePreferenceStore(requireContext())
@@ -111,16 +115,11 @@ class MineFragment : Fragment() {
         }
         binding.themeSettingsButton.setOnClickListener {
             val modes = ThemeMode.entries
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.theme_settings_title)
-                .setSingleChoiceItems(
-                    modes.map { getString(it.labelRes) }.toTypedArray(),
-                    modes.indexOf(themePreferenceStore.currentMode()),
-                ) { dialog, which ->
-                    dialog.dismiss()
-                    themePreferenceStore.select(modes[which])
-                }
-                .show()
+            requireContext().createOptionsSheet(
+                getString(R.string.theme_settings_title),
+                modes.map { getString(it.labelRes) },
+                selectedIndex = modes.indexOf(themePreferenceStore.currentMode()),
+            ) { index -> themePreferenceStore.select(modes[index]) }.show()
         }
     }
 
