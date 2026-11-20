@@ -18,44 +18,108 @@
             android:layout_marginTop="8dp" android:text="@string/series_skip_description"
             android:textColor="@color/text_secondary" android:textSize="14sp" />
 
-        <TextView
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical">
+                <TextView
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="@string/series_skip_intro_label" android:textColor="@color/text_primary"
+                    android:textStyle="bold" />
+                <TextView android:id="@+id/introSummary"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite" android:textColor="@color/text_secondary" />
+            </LinearLayout>
+            <com.google.android.material.button.MaterialButton android:id="@+id/markIntroButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:minHeight="48dp"
+                android:text="@string/series_skip_mark_intro" android:textColor="@color/series_skip_mark_text" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:gravity="center_vertical" android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical">
+                <TextView
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="@string/series_skip_outro_label" android:textColor="@color/text_primary"
+                    android:textStyle="bold" />
+                <TextView android:id="@+id/outroSummary"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite" android:textColor="@color/text_secondary" />
+            </LinearLayout>
+            <com.google.android.material.button.MaterialButton android:id="@+id/markOutroButton"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:minHeight="48dp"
+                android:text="@string/series_skip_mark_outro" android:textColor="@color/series_skip_mark_text" />
+        </LinearLayout>
+
+        <TextView android:id="@+id/markUnavailable"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" android:text="@string/series_skip_mark_unavailable"
+            android:textColor="@color/text_secondary" android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton android:id="@+id/manualToggle"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:text="@string/series_skip_show_manual"
+            android:textColor="@color/accent" />
+
+        <LinearLayout android:id="@+id/manualFields"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:visibility="gone">
+
+            <TextView
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="@string/series_skip_manual_description" android:textColor="@color/text_secondary" />
+
+            <TextView
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="16dp" android:text="@string/series_skip_intro_label"
             android:textColor="@color/text_primary" android:textStyle="bold" />
 
-        <LinearLayout
+            <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal">
-            <EditText android:id="@+id/introMinutes"
+                <EditText android:id="@+id/introMinutes"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:minHeight="48dp"
                 android:hint="@string/series_skip_intro_minutes" android:inputType="number"
                 android:maxLength="3" android:singleLine="true" />
-            <EditText android:id="@+id/introSeconds"
+                <EditText android:id="@+id/introSeconds"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:layout_marginStart="12dp" android:minHeight="48dp"
                 android:hint="@string/series_skip_intro_seconds" android:inputType="number"
                 android:maxLength="2" android:singleLine="true" />
-        </LinearLayout>
+            </LinearLayout>
 
-        <TextView
+            <TextView
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="16dp" android:text="@string/series_skip_outro_label"
             android:textColor="@color/text_primary" android:textStyle="bold" />
 
-        <LinearLayout
+            <LinearLayout
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal">
-            <EditText android:id="@+id/outroMinutes"
+                <EditText android:id="@+id/outroMinutes"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:minHeight="48dp"
                 android:hint="@string/series_skip_outro_minutes" android:inputType="number"
                 android:maxLength="3" android:singleLine="true" />
-            <EditText android:id="@+id/outroSeconds"
+                <EditText android:id="@+id/outroSeconds"
                 android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:layout_marginStart="12dp" android:minHeight="48dp"
                 android:hint="@string/series_skip_outro_seconds" android:inputType="number"
                 android:maxLength="2" android:singleLine="true" />
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout

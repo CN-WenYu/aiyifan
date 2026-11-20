@@ -26,7 +26,7 @@
     <string name="auto_skip_intro">已为您跳过片头</string>
     <string name="auto_skip_outro">即将跳过片尾，播放下一集</string>
     <string name="series_skip_title">设置本剧跳过时间</string>
-    <string name="series_skip_description">仅用于本剧，下次播放或切集时生效。留空或填 0 使用默认时间。</string>
+    <string name="series_skip_description">用当前进度标记跳过位置，仅对本剧生效。保存后，下次播放或切集时使用。</string>
     <string name="series_skip_intro_label">片头跳过时长</string>
     <string name="series_skip_outro_label">剩余多久时跳过片尾</string>
     <string name="series_skip_intro_minutes">片头分钟</string>
@@ -37,6 +37,15 @@
     <string name="series_skip_seconds_error">秒数请输入 0 到 59</string>
     <string name="series_skip_reset">恢复默认</string>
     <string name="series_skip_save">保存</string>
+    <string name="series_skip_mark_intro">标为片头结束</string>
+    <string name="series_skip_mark_outro">标为片尾开始</string>
+    <string name="series_skip_mark_unavailable">拖到片头结束或片尾开始的位置，再打开设置标记。</string>
+    <string name="series_skip_show_manual">手动调整</string>
+    <string name="series_skip_hide_manual">收起手动调整</string>
+    <string name="series_skip_manual_description">留空或填 0 使用默认时间。</string>
+    <string name="series_skip_default_value">使用默认</string>
+    <string name="series_skip_time_value">%1$02d:%2$02d</string>
+    <string name="series_skip_invalid_value">请检查输入</string>
     <string name="player_next_episode_hint">即将播放下一集</string>
     <string name="video_play_count">播放 %1$d</string>
     <string name="video_director">导演：%1$s</string>

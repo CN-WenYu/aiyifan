@@ -148,7 +148,9 @@ class VideoPlayerActivity : AppCompatActivity() {
             },
         )
         binding.playerView.setOnTouchListener(PlayerGestureTouchListener())
-        PlayerSettingsSheet(this, binding.playerView)
+        PlayerSettingsSheet(this, binding.playerView) {
+            if ((detail?.episodes?.size ?: 0) > 1) R.string.series_skip_title to ::showSeriesSkipSheet else null
+        }
         binding.playerView.findViewById<ImageButton>(R.id.playerPreviousEpisodeButton).setOnClickListener { switchEpisode(-1) }
         binding.playerView.findViewById<ImageButton>(R.id.playerNextEpisodeButton).setOnClickListener { switchEpisode(1) }
         binding.playerView.findViewById<View>(R.id.playerSleepTimerButton).setOnClickListener { showSleepTimer() }
@@ -164,13 +166,7 @@ class VideoPlayerActivity : AppCompatActivity() {
                 renderNextEpisodeHint()
             }
         }
-        binding.seriesSkipSettingsButton.setOnClickListener {
-            val series = detail?.takeIf { it.episodes.size > 1 } ?: return@setOnClickListener
-            seriesSkipSheet?.dismiss()
-            seriesSkipSheet = SeriesAutoSkipSheet.show(this, autoSkipPreferenceStore.getSeriesTimes(series.mediaKey)) {
-                autoSkipPreferenceStore.setSeriesTimes(series.mediaKey, it)
-            }
-        }
+        binding.seriesSkipSettingsButton.setOnClickListener { showSeriesSkipSheet() }
         binding.inAppMiniPlayPauseButton.setOnClickListener {
             playbackController.togglePlayPause()
             updateInAppMiniPlayPauseButton()
@@ -470,6 +466,20 @@ class VideoPlayerActivity : AppCompatActivity() {
                 alpha = if (isEnabled) 1f else 0.4f
             }
         }
+    }
+
+    private fun showSeriesSkipSheet() {
+        val series = detail?.takeIf { it.episodes.size > 1 } ?: return
+        if (!ownsPlaybackSelection() || series.mediaKey != playbackController.requestedMediaKey) return
+        val ready = playbackController.canSeek && !playbackController.hasPlaybackError &&
+            playbackController.activeSession?.detail?.mediaKey == series.mediaKey
+        val markers = if (ready) {
+            SeriesSkipMarkers.fromPlayback(playbackController.currentPositionMs, playbackController.durationMs)
+        } else SeriesSkipMarkers()
+        seriesSkipSheet?.dismiss()
+        seriesSkipSheet = SeriesAutoSkipSheet.show(
+            this, autoSkipPreferenceStore.getSeriesTimes(series.mediaKey), markers,
+        ) { autoSkipPreferenceStore.setSeriesTimes(series.mediaKey, it) }
     }
 
     private fun showSleepTimer() {
@@ -841,6 +851,8 @@ class VideoPlayerActivity : AppCompatActivity() {
         resetFullscreenLock()
         sleepTimerDialog?.dismiss()
         sleepTimerDialog = null
+        seriesSkipSheet?.dismiss()
+        seriesSkipSheet = null
         unregisterPositionListener()
         removeStateListener?.invoke()
         removeStateListener = null

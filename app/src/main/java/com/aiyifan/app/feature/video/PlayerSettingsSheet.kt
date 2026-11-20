@@ -22,6 +22,7 @@ import kotlin.math.abs
 internal class PlayerSettingsSheet(
     private val activity: AppCompatActivity,
     private val playerView: PlayerView,
+    private val extraOption: () -> Pair<Int, () -> Unit>? = { null },
 ) : DefaultLifecycleObserver {
     private var dialog: BottomSheetDialog? = null
 
@@ -56,6 +57,7 @@ internal class PlayerSettingsSheet(
             ) {
                 add(MediaR.string.exo_track_selection_title_audio to { showTracks(player, C.TRACK_TYPE_AUDIO) })
             }
+            extraOption()?.let(::add)
         }
         if (entries.isEmpty()) return
         show(activity.createOptionsSheet(

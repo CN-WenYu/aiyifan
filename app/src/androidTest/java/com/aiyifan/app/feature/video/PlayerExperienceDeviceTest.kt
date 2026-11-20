@@ -545,8 +545,8 @@ class PlayerExperienceDeviceTest {
             waitForText("设置本剧跳过时间")
             screenshot("series-skip-sheet.png")
             scenario.onActivity { activity ->
-                val sheet = VideoPlayerActivity::class.java.getDeclaredField("seriesSkipSheet")
-                    .apply { isAccessible = true }.get(activity) as android.app.Dialog
+                val sheet = seriesSkipSheet(activity)
+                sheet.findViewById<View>(R.id.manualToggle).performClick()
                 sheet.findViewById<android.widget.EditText>(R.id.introMinutes).setText("")
                 sheet.findViewById<android.widget.EditText>(R.id.introSeconds).setText("2")
                 sheet.findViewById<android.widget.EditText>(R.id.outroMinutes).setText("0")
@@ -596,6 +596,85 @@ class PlayerExperienceDeviceTest {
             automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
         }
     }
+
+    @Test
+    fun seriesSkipMarkersSaveFromBothPlayerSizesWithoutKeyboard() = withPlayback { scenario, controller ->
+        val preferences = AutoSkipPreferenceStore(context)
+        val mediaKey = mainValue { controller.activeSession!!.detail.mediaKey }
+        val previousTimes = preferences.getSeriesTimes(mediaKey)
+        val originalFlags = automation.serviceInfo.flags
+        fun openFromGear() {
+            scenario.onActivity { activity ->
+                val player = activity.findViewById<androidx.media3.ui.PlayerView>(R.id.playerView)
+                player.showController()
+                assertTrue(player.findViewById<View>(androidx.media3.ui.R.id.exo_settings).performClick())
+            }
+            assertTrue(waitForText("设置本剧跳过时间").performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            waitForNode("markIntroButton")
+        }
+        fun assertManualCollapsedAndKeyboardHidden() {
+            scenario.onActivity { activity ->
+                val sheet = seriesSkipSheet(activity)
+                assertFalse(sheet.findViewById<View>(R.id.manualFields).isShown)
+                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(sheet.window!!.decorView)
+                assertNotNull(insets)
+                assertFalse(insets!!.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()))
+            }
+        }
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            preferences.setSeriesTimes(mediaKey, SeriesSkipTimes())
+            mainValue { controller.pause(); controller.seekTo(0L) }
+            await { controller.canSeek && controller.currentPositionMs == 0L }
+            openFromGear()
+            assertFalse(waitForNode("markIntroButton").isEnabled)
+            assertFalse(waitForNode("markOutroButton").isEnabled)
+            scenario.onActivity { seriesSkipSheet(it).cancel() }
+
+            mainValue { controller.seekTo(2_000L) }
+            await { controller.canSeek && controller.currentPositionMs == 2_000L }
+            openFromGear()
+            val introButton = waitForNode("markIntroButton")
+            assertTrue("The ready player should allow marking the intro", introButton.isEnabled)
+            assertTrue(introButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            waitForText("00:02")
+            assertManualCollapsedAndKeyboardHidden()
+            assertEquals(SeriesSkipTimes(), preferences.getSeriesTimes(mediaKey))
+            screenshot("series-skip-markers-portrait.png")
+            assertTrue(waitForNode("saveButton").performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            await { preferences.getSeriesTimes(mediaKey) == SeriesSkipTimes(2L, 0L) }
+
+            scenario.onActivity { activity ->
+                activity.findViewById<View>(R.id.fullScreenButton).performClick()
+                controller.seekTo(controller.durationMs - 3_000L)
+            }
+            await { controller.canSeek && controller.durationMs - controller.currentPositionMs == 3_000L }
+            openFromGear()
+            assertTrue(waitForNode("markOutroButton").performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            waitForText("00:03")
+            assertManualCollapsedAndKeyboardHidden()
+            screenshot("series-skip-markers-fullscreen.png")
+            scenario.onActivity { seriesSkipSheet(it).cancel() }
+            assertEquals(SeriesSkipTimes(2L, 0L), preferences.getSeriesTimes(mediaKey))
+
+            openFromGear()
+            waitForText("使用默认")
+            assertTrue(waitForNode("markOutroButton").performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            waitForText("00:03")
+            assertTrue(waitForNode("saveButton").performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            await { preferences.getSeriesTimes(mediaKey) == SeriesSkipTimes(2L, 3L) }
+        } finally {
+            preferences.setSeriesTimes(mediaKey, previousTimes)
+            automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
+        }
+    }
+
+    private fun seriesSkipSheet(activity: VideoPlayerActivity): android.app.Dialog =
+        VideoPlayerActivity::class.java.getDeclaredField("seriesSkipSheet")
+            .apply { isAccessible = true }.get(activity) as android.app.Dialog
 
     private fun withPlayback(
         episodeCount: Int = 2,
