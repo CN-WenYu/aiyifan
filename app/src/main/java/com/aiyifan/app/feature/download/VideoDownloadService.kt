@@ -23,6 +23,16 @@ class VideoDownloadService : DownloadService(
 ) {
     private val notificationHelper by lazy { DownloadNotificationHelper(this, CHANNEL_ID) }
 
+    override fun onCreate() {
+        super.onCreate()
+        isRunning = true
+    }
+
+    override fun onDestroy() {
+        isRunning = false
+        super.onDestroy()
+    }
+
     override fun getDownloadManager(): DownloadManager = AppGraph.downloadRepository.manager
 
     override fun getScheduler(): Scheduler = PlatformScheduler(this, SCHEDULER_JOB_ID)
@@ -48,6 +58,8 @@ class VideoDownloadService : DownloadService(
     }
 
     companion object {
+        internal var isRunning = false
+            private set
         const val CHANNEL_ID = "offline_downloads"
         const val NOTIFICATION_ID = 7301
         const val SCHEDULER_JOB_ID = 7302

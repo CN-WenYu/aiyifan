@@ -122,7 +122,7 @@ class HeaderGestureDeviceTest {
 
     @Test fun bidirectionalSwipeWhilePausedAndExpandedStateSurviveRecreation() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(2)!!.select() }
+            scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select() }
             await(scenario) { it.findViewById<ImageButton>(R.id.headerExpand).isEnabled }
             scenario.onActivity { it.findViewById<ImageButton>(R.id.headerPlayback).performClick() }
             swipe(scenario, -0.4f, 4f)
@@ -156,7 +156,7 @@ class HeaderGestureDeviceTest {
 
     @Test fun repeatedCancelledGesturesDoNotChangeImageOrExpandedState() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(2)!!.select() }
+            scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select() }
             await(scenario) { it.findViewById<ImageButton>(R.id.headerExpand).isEnabled }
             scenario.onActivity { it.findViewById<ImageButton>(R.id.headerPlayback).performClick() }
             repeat(8) {

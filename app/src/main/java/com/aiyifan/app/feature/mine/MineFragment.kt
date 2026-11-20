@@ -14,6 +14,7 @@ import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.ui.ThemeMode
 import com.aiyifan.app.core.ui.ThemePreferenceStore
 import com.aiyifan.app.databinding.FragmentMineBinding
+import com.aiyifan.app.feature.download.showDownloadCountDialog
 import com.aiyifan.app.feature.collection.CollectionActivity
 import com.aiyifan.app.feature.history.HistoryActivity
 import com.aiyifan.app.feature.hot.HotActivity
@@ -101,7 +102,13 @@ class MineFragment : Fragment() {
         binding.historyButton.setOnClickListener { startActivity(Intent(requireContext(), HistoryActivity::class.java)) }
         binding.collectionButton.setOnClickListener { startActivity(Intent(requireContext(), CollectionActivity::class.java)) }
         binding.hotButton.setOnClickListener { startActivity(Intent(requireContext(), HotActivity::class.java)) }
-        binding.downloadsButton.setOnClickListener { startActivity(Intent(requireContext(), com.aiyifan.app.feature.download.DownloadsActivity::class.java)) }
+        binding.downloadCountRow.setOnClickListener {
+            requireContext().showDownloadCountDialog { refreshDownloadSettings() }
+        }
+        binding.mobileDownloadSwitch.setOnCheckedChangeListener { _, allowed ->
+            val repository = AppGraph.downloadRepository
+            if (repository.mobileDataAllowed != allowed) repository.setMobileDataAllowed(allowed)
+        }
         binding.themeSettingsButton.setOnClickListener {
             val modes = ThemeMode.entries
             MaterialAlertDialogBuilder(requireContext())
@@ -130,6 +137,14 @@ class MineFragment : Fragment() {
         binding.historyCount.text = AppGraph.catalogRepository.getHistory().size.toString()
         binding.favoriteCount.text = AppGraph.catalogRepository.getFavorites().size.toString()
         binding.themeSettingsSummary.setText(themePreferenceStore.currentMode().labelRes)
+        refreshDownloadSettings()
+    }
+
+    private fun refreshDownloadSettings() {
+        val views = _binding ?: return
+        val repository = AppGraph.downloadRepository
+        views.downloadCountValue.text = getString(R.string.download_parallel_option, repository.parallelDownloads)
+        views.mobileDownloadSwitch.isChecked = repository.mobileDataAllowed
     }
 
     private fun configureExpansion(reload: Boolean = true, forceReload: Boolean = false) {

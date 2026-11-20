@@ -15,23 +15,13 @@ class DownloadLibraryPresentationTest {
     }
 
     @Test fun `byte progress uses measured length not segment percentage`() {
-        val progress = downloadProgress(250, 1000, 80f, true)
-        assertEquals(25, progress.percent)
-        assertFalse(progress.segmentBased)
-        assertFalse(progress.indeterminate)
+        assertEquals(25, downloadPercent(250, 1000, 80f))
     }
 
-    @Test fun `unknown length retains segment progress without inventing total bytes`() {
-        val progress = downloadProgress(250, -1, 38.9f, true)
-        assertEquals(38, progress.percent)
-        assertTrue(progress.segmentBased)
-        assertNull(progress.totalBytes)
-    }
-
-    @Test fun `unknown paused or waiting progress stays still`() {
-        assertFalse(downloadProgress(0, -1, -1f, false).indeterminate)
-        assertTrue(downloadProgress(0, -1, -1f, true).indeterminate)
-        assertNull(downloadProgress(0, -1, Float.NaN, true).percent)
+    @Test fun `unknown length uses available progress and hides unknown percentage`() {
+        assertEquals(38, downloadPercent(250, -1, 38.9f))
+        assertNull(downloadPercent(0, -1, -1f))
+        assertNull(downloadPercent(0, -1, Float.NaN))
     }
 
     @Test fun `film snapshot retains undownloaded episodes and original ordering`() {

@@ -11,14 +11,14 @@ import org.w3c.dom.Element
 class MainNavigationLayoutTest {
 
     @Test
-    fun `main navigation uses three fixed text tabs`() {
+    fun `main navigation uses four fixed text tabs`() {
         val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(layoutFile())
         val tabLayout = viewWithId(document.documentElement, "bottomTabs")
 
         assertNotNull(tabLayout)
         assertEquals("fixed", tabLayout!!.getAttribute("app:tabMode"))
         assertEquals("fill", tabLayout.getAttribute("app:tabGravity"))
-        assertEquals(3, tabLayout.getElementsByTagName("com.google.android.material.tabs.TabItem").length)
+        assertEquals(4, tabLayout.getElementsByTagName("com.google.android.material.tabs.TabItem").length)
     }
 
     @Test

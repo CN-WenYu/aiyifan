@@ -24,17 +24,26 @@ data class DownloadTask(
     val preparing: Boolean = false,
 ) {
     val id: String get() = download.request.id
+    internal val usableEstimatedTotalBytes: Long?
+        get() = metadata?.estimatedTotalBytes?.takeIf { it > bytesDownloaded.coerceAtLeast(0) }
+
+    internal val remainingBytes: Long?
+        get() {
+            val total = download.contentLength.takeIf { it > 0 } ?: usableEstimatedTotalBytes ?: return null
+            return (total - bytesDownloaded.coerceAtLeast(0)).coerceAtLeast(0)
+        }
+
     internal val queueAction: DownloadQueueAction?
-        get() = if (metadata == null) null else DownloadQueueAction.forState(download.state)
+        get() = if (metadata == null) null else DownloadQueueAction.forDownload(download)
 }
 
 internal enum class DownloadQueueAction {
     PAUSE, RESUME;
 
     companion object {
-        fun forState(state: Int): DownloadQueueAction? = when (state) {
+        fun forDownload(download: Download): DownloadQueueAction? = when (download.state) {
             Download.STATE_QUEUED, Download.STATE_DOWNLOADING -> PAUSE
-            Download.STATE_STOPPED -> RESUME
+            Download.STATE_STOPPED -> if (download.stopReason == STOP_REASON_WIFI) PAUSE else RESUME
             else -> null
         }
     }
@@ -42,10 +51,11 @@ internal enum class DownloadQueueAction {
 
 /** Only an offline playback snapshot is stored; favorites, history and unrelated episodes stay out. */
 data class DownloadMetadata(val detail: VideoDetail, val episode: Episode, val episodeOrder: Int,
-    val generation: String? = null) {
+    val generation: String? = null, val estimatedTotalBytes: Long? = null) {
     fun encode(): ByteArray = JSONObject().apply {
         put("version", 2)
         put("generation", generation)
+        put("estimatedTotalBytes", estimatedTotalBytes)
         put("mediaKey", detail.mediaKey)
         put("title", detail.title)
         put("coverUrl", detail.coverUrl)
@@ -92,7 +102,8 @@ data class DownloadMetadata(val detail: VideoDetail, val episode: Episode, val e
             val generation = json.optionalString("generation")
             require(detail.mediaKey.isNotBlank() && episode.episodeKey.isNotBlank() &&
                 (generation != null || !episode.mediaUrl.isNullOrBlank()))
-            DownloadMetadata(detail, episode, json.getInt("episodeOrder"), generation)
+            DownloadMetadata(detail, episode, json.getInt("episodeOrder"), generation,
+                json.optionalLong("estimatedTotalBytes")?.takeIf { it > 0 })
         }.getOrNull()
 
         private fun JSONObject.optionalString(key: String): String? =

@@ -12,19 +12,18 @@ import androidx.recyclerview.widget.RecyclerView
 import com.aiyifan.app.R
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
+import com.aiyifan.app.core.ui.showDestructiveConfirmation
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.usesLightSystemBarIcons
 import com.aiyifan.app.databinding.ItemDownloadEpisodeBinding
 import com.aiyifan.app.databinding.SheetDownloadSelectionBinding
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /** Reads only the current library snapshot; never resolves remote details or playback sources. */
 internal class DownloadLibrarySheet(
     private val activity: AppCompatActivity,
     val mediaKey: String,
-    private val managing: Boolean,
     private val play: (String) -> Unit,
     private val enqueue: (VideoDetail, Episode) -> Unit,
     private val remove: (List<String>) -> Unit,
@@ -32,6 +31,7 @@ internal class DownloadLibrarySheet(
 ) {
     private val dialog = BottomSheetDialog(activity, R.style.ThemeOverlay_Aiyifan_DownloadSheet)
     private val binding = SheetDownloadSelectionBinding.inflate(LayoutInflater.from(dialog.context))
+    private var managing = false
     private val selected = linkedSetOf<String>()
     private var episodes = emptyList<LibraryEpisode>()
     private val adapter = EpisodeAdapter()
@@ -49,15 +49,16 @@ internal class DownloadLibrarySheet(
             setShouldRemoveExpandedCorners(false)
             state = BottomSheetBehavior.STATE_EXPANDED
         }
-        binding.sheetTitle.setText(if (managing) R.string.download_library_manage_title else R.string.download_library_episodes)
         binding.videoTitle.text = film.detail.title
         binding.closeButton.contentDescription = activity.getString(R.string.download_library_close)
         binding.closeButton.setOnClickListener { dialog.dismiss() }
-        binding.statusScroll.isVisible = false
         binding.networkHint.isVisible = false
-        binding.secondaryButton.isVisible = false
-        binding.primaryButton.isVisible = managing
-        binding.selectAllButton.isVisible = managing
+        binding.statusScroll.isVisible = false
+        binding.secondaryButton.setText(R.string.download_library_manage)
+        binding.secondaryButton.setOnClickListener {
+            managing = true
+            currentFilm?.let(::update)
+        }
         val grid = GridLayoutManager(activity, 4)
         binding.episodes.layoutManager = grid
         binding.episodes.adapter = adapter
@@ -74,13 +75,11 @@ internal class DownloadLibrarySheet(
         binding.primaryButton.setOnClickListener {
             if (selected.isEmpty()) return@setOnClickListener
             val ids = selected.toList()
-            MaterialAlertDialogBuilder(activity)
-                .setMessage(activity.getString(R.string.download_library_delete_confirmation, ids.size))
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.download_delete) { _, _ ->
-                    dialog.dismiss()
-                    remove(ids)
-                }.show()
+            activity.showDestructiveConfirmation(R.string.download_library_delete_title,
+                activity.getString(R.string.download_library_delete_confirmation, ids.size), R.string.download_delete) {
+                dialog.dismiss()
+                remove(ids)
+            }
         }
         dialog.setOnDismissListener {
             activity.lifecycle.removeObserver(lifecycleObserver)
@@ -97,7 +96,11 @@ internal class DownloadLibrarySheet(
 
     fun update(film: DownloadFilm?) {
         if (film == null) { dialog.dismiss(); return }
-        filmDetail = film.detail
+        currentFilm = film
+        binding.sheetTitle.setText(if (managing) R.string.download_library_manage_title else R.string.download_library_episodes)
+        binding.primaryButton.isVisible = managing
+        binding.selectAllButton.isVisible = managing
+        binding.secondaryButton.isVisible = !managing
         episodes = if (managing) film.episodes.filter { it.state == LibraryEpisodeState.DOWNLOADED } else film.episodes
         selected.retainAll(episodes.mapNotNull { it.downloadId }.toSet())
         binding.episodeCount.text = activity.getString(R.string.download_episode_count, episodes.size)
@@ -139,7 +142,7 @@ internal class DownloadLibrarySheet(
                             dialog.dismiss()
                             play(it)
                         }
-                        LibraryEpisodeState.NOT_DOWNLOADED -> filmDetail?.let { enqueue(it, item.episode) }
+                        LibraryEpisodeState.NOT_DOWNLOADED -> currentFilm?.detail?.let { enqueue(it, item.episode) }
                         else -> Unit
                     }
                 }
@@ -147,7 +150,9 @@ internal class DownloadLibrarySheet(
         }
     }
 
-    private var filmDetail: VideoDetail? = null
+    private var currentFilm: DownloadFilm? = null
+
+    fun dismiss() = dialog.dismiss()
 
     private class EpisodeHolder(val binding: ItemDownloadEpisodeBinding) : RecyclerView.ViewHolder(binding.root)
 }

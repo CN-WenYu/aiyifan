@@ -9,25 +9,18 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Util
-import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheKeyFactory
-import androidx.media3.datasource.cache.NoOpCacheEvictor
-import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.DefaultRendererCapabilitiesList
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
 import androidx.media3.exoplayer.hls.HlsManifest
 import androidx.media3.exoplayer.offline.Download
-import androidx.media3.exoplayer.offline.DefaultDownloadIndex
-import androidx.media3.exoplayer.offline.DefaultDownloaderFactory
-import androidx.media3.exoplayer.offline.DownloaderFactory
 import androidx.media3.exoplayer.offline.DownloadHelper
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
-import androidx.media3.exoplayer.scheduler.Requirements
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import com.aiyifan.app.R
@@ -37,7 +30,6 @@ import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.feature.download.VideoDownloadService
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CompletableDeferred
@@ -76,8 +68,30 @@ class OfflineDownloadRepository(
     private val initialized = CompletableDeferred<Unit>()
     private val mutableTasks = MutableStateFlow<List<DownloadTask>>(emptyList())
     val tasks: StateFlow<List<DownloadTask>> = mutableTasks.asStateFlow()
-    val mobileDataAllowed: Boolean get() = preferences.getBoolean("mobile_data_allowed", false)
-    val isWaitingForNetwork: Boolean get() = requirements().getNotMetRequirements(context) != 0
+    val mobileDataAllowed get() = runtime.policy.always
+    internal fun needsMobileConsent(ids: Collection<String>) =
+        runtime.policy.needsConsent && ids.any { !runtime.policy.authorized(it) }
+
+    val parallelDownloads get() = manager.maxParallelDownloads
+    fun setParallelDownloads(count: Int) {
+        require(count in 1..3)
+        manager.maxParallelDownloads = count
+        preferences.edit().putInt("parallel_downloads", count).apply()
+    }
+
+    suspend fun storageBytes() = withContext(Dispatchers.IO) {
+        runtime.cache.cacheSpace to android.os.StatFs(context.filesDir.path).availableBytes
+    }
+
+    internal fun clearOnce(ids: Collection<String>) {
+        ids.forEach { runtime.policy.grantOnce(it, false) }
+        runtime.policy.reconcile(manager)
+    }
+
+    internal fun allowOnce(ids: Collection<String>) {
+        ids.forEach { runtime.policy.grantOnce(it, true) }
+        runtime.policy.reconcile(manager)
+    }
 
     init {
         checkMainThread()
@@ -101,7 +115,6 @@ class OfflineDownloadRepository(
             }
         })
         if (manager.isInitialized) initialized.complete(Unit)
-        manager.requirements = requirements()
         refresh()
         scope.launch {
             while (isActive) {
@@ -111,14 +124,16 @@ class OfflineDownloadRepository(
         }
     }
 
+    internal fun reconcileNetwork() = runtime.policy.reconcile(manager)
+
     fun setMobileDataAllowed(allowed: Boolean) {
         checkMainThread()
         preferences.edit().putBoolean("mobile_data_allowed", allowed).apply()
-        manager.requirements = requirements()
+        runtime.policy.reconcile(manager)
         refresh()
     }
 
-    suspend fun enqueue(detail: VideoDetail, episode: Episode): String = mutation(downloadId(detail.mediaKey, episode.episodeKey)).withLock {
+    suspend fun enqueue(detail: VideoDetail, episode: Episode, allowMobileOnce: Boolean = false): String = mutation(downloadId(detail.mediaKey, episode.episodeKey)).withLock {
         withContext(Dispatchers.Main.immediate) {
             initialized.await()
             val id = downloadId(detail.mediaKey, episode.episodeKey)
@@ -130,7 +145,8 @@ class OfflineDownloadRepository(
                 runtime.preparers[id] = ::resolveAndPrepare
                 withContext(NonCancellable) {
                     startService()
-                    manager.addDownload(request)
+                    runtime.policy.grantOnce(id, allowMobileOnce)
+                    manager.addDownload(request, runtime.policy.stopReason(id))
                     manager.resumeDownloads()
                     awaitDownload(id) { it != null }
                     refreshNow()
@@ -148,13 +164,16 @@ class OfflineDownloadRepository(
         checkMainThread()
         // A task may have finished or been removed since the list was rendered.
         val targets = manager.currentDownloads.filter {
-            it.request.id in ids && DownloadQueueAction.forState(it.state) == action
+            it.request.id in ids && (DownloadQueueAction.forDownload(it) == action ||
+                (action == DownloadQueueAction.RESUME && it.stopReason == STOP_REASON_WIFI))
         }
         if (targets.isEmpty()) return
         val resume = action == DownloadQueueAction.RESUME
         if (resume) startService()
-        val reason = if (resume) Download.STOP_REASON_NONE else STOP_REASON_USER
-        targets.forEach { manager.setStopReason(it.request.id, reason) }
+        targets.forEach {
+            if (!resume) runtime.policy.grantOnce(it.request.id, false)
+            manager.setStopReason(it.request.id, if (resume) runtime.policy.stopReason(it.request.id) else STOP_REASON_USER)
+        }
         if (resume) manager.resumeDownloads()
         // The manager listener publishes the resulting states, including downloads waiting for Wi-Fi.
     }
@@ -168,11 +187,11 @@ class OfflineDownloadRepository(
                 ?: throw IOException(context.getString(R.string.download_error_metadata))
             // Preserve the previous resolved request/cache until fresh resolution succeeds.
             if (!isDeferred(previous.request)) withContext(Dispatchers.IO) { runtime.snapshots.saveSource(null, previous.request) }
-            val request = deferredRequest(id, metadata.copy(generation = java.util.UUID.randomUUID().toString()))
+            val request = deferredRequest(id, metadata.copy(generation = java.util.UUID.randomUUID().toString(), estimatedTotalBytes = null))
             runtime.preparers[id] = ::resolveAndPrepare
             withContext(NonCancellable) {
                 startService()
-                manager.addDownload(request, Download.STOP_REASON_NONE)
+                manager.addDownload(request, runtime.policy.stopReason(id))
                 manager.resumeDownloads()
                 awaitDownload(id) { it != null && it.request.data.contentEquals(request.data) && it.state != Download.STATE_REMOVING }
                 refreshNow()
@@ -189,6 +208,7 @@ class OfflineDownloadRepository(
             runtime.filmMutation(mediaKey ?: id).withLock {
                 startService()
                 removeAndAwait(id)
+                runtime.policy.grantOnce(id, false)
                 refreshNow()
                 if (mediaKey != null && tasks.value.none { it.metadata?.detail?.mediaKey == mediaKey }) {
                     withContext(Dispatchers.IO) { runtime.snapshots.removeFilm(mediaKey) }
@@ -313,10 +333,6 @@ class OfflineDownloadRepository(
         runtime.preparers.remove(id)
     }
 
-    private fun requirements(): Requirements = Requirements(
-        if (mobileDataAllowed) Requirements.NETWORK else Requirements.NETWORK_UNMETERED,
-    )
-
     private fun startService() {
         DownloadService.startForeground(context, VideoDownloadService::class.java)
     }
@@ -327,8 +343,10 @@ class OfflineDownloadRepository(
     private suspend fun resolveAndPrepare(request: DownloadRequest): DownloadRequest = withContext(Dispatchers.Main.immediate) {
         val original = DownloadMetadata.decode(request.data) ?: throw IOException("Missing download metadata")
         try {
+            runtime.policy.enforce(request.id)
             val resolved = catalog.resolveDownload(original.detail, original.episode)
             val prepared = prepareRequest(request.id, original.copy(episode = resolved))
+            runtime.policy.enforce(request.id)
             cachePoster(original.detail)
             prepared
         } catch (error: kotlinx.coroutines.CancellationException) { throw error }
@@ -380,7 +398,7 @@ class OfflineDownloadRepository(
         // Also prepare progressive sources so encrypted MP4 tracks are rejected before enqueueing.
         val helper = DownloadHelper(
             item,
-            DefaultMediaSourceFactory(runtime.upstream)
+            DefaultMediaSourceFactory(runtime.policy.upstream(id, runtime.upstream))
                 .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(2))
                 .createMediaSource(item),
             parameters,
@@ -416,7 +434,9 @@ class OfflineDownloadRepository(
                                 val request = helper.getDownloadRequest(id, metadata.encode())
                                 // Empty HLS stream keys mean "download all", so reject instead of silently downloading every variant.
                                 requireDownload(type != C.CONTENT_TYPE_HLS || request.streamKeys.isNotEmpty(), DownloadFailure.TRACKS)
-                                continuation.resume(request)
+                                val estimate = manifest?.estimatedBytes(request)
+                                continuation.resume(if (estimate == null) request else
+                                    helper.getDownloadRequest(id, metadata.copy(estimatedTotalBytes = estimate).encode()))
                             } catch (error: Exception) {
                                 continuation.resumeWithException(error)
                             }
@@ -447,47 +467,12 @@ class OfflineDownloadRepository(
     }
 }
 
-/** Exactly one cache and manager per application process, also if a second repository is requested. */
-private class DownloadRuntime private constructor(context: Context) {
-    val upstream = DefaultHttpDataSource.Factory().setConnectTimeoutMs(15_000).setReadTimeoutMs(20_000)
-    private val database = StandaloneDatabaseProvider(context)
-    val cache = SimpleCache(File(context.filesDir, "offline_downloads"), NoOpCacheEvictor(), database)
-    val snapshots = DownloadSnapshotStore(File(context.filesDir, "offline_download_metadata"))
-    val mutations = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
-    private val filmMutations = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
-    fun filmMutation(mediaKey: String) = filmMutations.getOrPut(mediaKey) { Mutex() }
-    var defaultPreparer: (suspend (DownloadRequest) -> DownloadRequest)? = null
-    val preparers = java.util.concurrent.ConcurrentHashMap<String, suspend (DownloadRequest) -> DownloadRequest>()
-    private val executor = Executors.newFixedThreadPool(2)
-    val manager = DownloadManager(context, DefaultDownloadIndex(database), DownloaderFactory { request ->
-        val factory = DefaultDownloaderFactory(
-            CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstream)
-                .setCacheKeyFactory(taskCacheKeys(request.id)),
-            executor,
-        )
-        if (isDeferred(request)) DeferredDownloader(request, snapshots,
-            { queued -> requireNotNull(preparers[queued.id] ?: defaultPreparer).invoke(queued) },
-            factory::createDownloader,
-            { cache.keys.filter { it.startsWith(taskCachePrefix(request.id)) }.forEach(cache::removeResource) })
-        else factory.createDownloader(request)
-    }).apply {
-        maxParallelDownloads = 2
-        minRetryCount = 2
-    }
-
-    companion object {
-        private var instance: DownloadRuntime? = null
-        @Synchronized fun get(context: Context): DownloadRuntime {
-            check(Looper.myLooper() == Looper.getMainLooper())
-            return instance ?: DownloadRuntime(context).also { instance = it }
-        }
-    }
+private fun HlsManifest.estimatedBytes(request: DownloadRequest): Long? {
+    val variant = request.streamKeys.singleOrNull { it.groupIndex == HlsMultivariantPlaylist.GROUP_INDEX_VARIANT }
+        ?: return null
+    val format = multivariantPlaylist.variants.getOrNull(variant.streamIndex)?.format ?: return null
+    // A variant declares the combined bitrate of its video and associated audio renditions.
+    val bitrate = format.averageBitrate.takeIf { it > 0 } ?: format.peakBitrate.takeIf { it > 0 } ?: return null
+    val durationUs = mediaPlaylist.durationUs.takeIf { it > 0 } ?: return null
+    return (durationUs.toDouble() * bitrate / 8_000_000).toLong().takeIf { it > 0 }
 }
-
-private fun taskCacheKeys(id: String) = CacheKeyFactory { spec ->
-    "${taskCachePrefix(id)}${CacheKeyFactory.DEFAULT.buildCacheKey(spec)}"
-}
-
-private fun taskCachePrefix(id: String) = "${id.length}:$id:"
-
-private fun isDeferred(request: DownloadRequest) = request.uri.scheme == "offline-task"

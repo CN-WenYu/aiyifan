@@ -40,7 +40,7 @@ class HeaderSlideshowDeviceTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity {
                 it.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(2)!!.select()
+                it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select()
             }
             awaitImage(scenario)
             scenario.onActivity {
@@ -80,7 +80,7 @@ class HeaderSlideshowDeviceTest {
             SystemClock.sleep(5500)
             scenario.onActivity {
                 assertEquals(index, state(it).index)
-                it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(2)!!.select()
+                it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select()
             }
             awaitImage(scenario)
             scenario.onActivity { it.findViewById<ImageButton>(R.id.headerPlayback).performClick() }
@@ -109,7 +109,7 @@ class HeaderSlideshowDeviceTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity {
                 it.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(2)!!.select()
+                it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select()
             }
             awaitImage(scenario)
             var previous = 0
