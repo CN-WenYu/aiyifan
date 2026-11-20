@@ -22,11 +22,15 @@ import com.aiyifan.app.R
 import com.aiyifan.app.core.startup.AppMode
 import com.aiyifan.app.core.startup.StartupSession
 import com.aiyifan.app.feature.main.MainActivity
+import com.bumptech.glide.Glide
 import com.google.android.material.tabs.TabLayout
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class HeaderFullScreenDeviceTest {
@@ -106,6 +110,59 @@ class HeaderFullScreenDeviceTest {
             }
             capture("full-screen-header.png")
         }
+    }
+
+    @Test fun preloadsAlongTheSwipeDirectionAndReusesDiskCacheOffline() {
+        // This test clears Glide's disk cache, so opt in on a development emulator.
+        assumeTrue(InstrumentationRegistry.getArguments().getString("headerPreload") == "true")
+        val context = instrumentation.targetContext
+        val names = HeaderImageSource.allNames.subList(10, 18)
+        Glide.get(context).clearDiskCache()
+        val intent = HeaderImageActivity.intent(context, names, initialPosition = 3)
+        ActivityScenario.launch<HeaderImageActivity>(intent).use { scenario ->
+            awaitPage(scenario, 3)
+            awaitCached(names[2])
+            awaitCached(names[4])
+            awaitCached(names[5])
+
+            swipe(scenario, forward = true)
+            awaitPage(scenario, 4)
+            awaitCached(names[6])
+
+            swipe(scenario, forward = false)
+            awaitPage(scenario, 3)
+            awaitCached(names[1])
+            swipe(scenario, forward = false)
+            awaitPage(scenario, 2)
+            awaitCached(names[0])
+        }
+
+        val offlineIntent = HeaderImageActivity.intent(context, names.take(3), initialPosition = 1, cacheOnly = true)
+        ActivityScenario.launch<HeaderImageActivity>(offlineIntent).use { scenario ->
+            awaitPage(scenario, 1)
+            swipe(scenario, forward = false)
+            awaitPage(scenario, 0)
+            swipe(scenario, forward = false)
+            awaitPage(scenario, 0)
+        }
+    }
+
+    private fun awaitCached(name: String) {
+        val requests = Glide.with(instrumentation.targetContext.applicationContext)
+        val deadline = SystemClock.uptimeMillis() + 8_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            val target = requests.downloadOnly().load(HeaderImageSource.model(name))
+                .onlyRetrieveFromCache(true).submit()
+            try {
+                if (target.get(2, TimeUnit.SECONDS).length() > 0L) return
+            } catch (_: ExecutionException) {
+                // A cache miss is expected while the asynchronous preload is in flight.
+            } finally {
+                requests.clear(target)
+            }
+            SystemClock.sleep(100)
+        }
+        fail("No cached image before opening the page: $name")
     }
 
     private fun assertSavesOriginal(scenario: ActivityScenario<HeaderImageActivity>, expectedName: String) {

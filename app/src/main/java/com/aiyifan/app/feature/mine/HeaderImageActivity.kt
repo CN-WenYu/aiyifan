@@ -22,22 +22,44 @@ import com.aiyifan.app.R
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.databinding.ActivityHeaderImageBinding
 import com.bumptech.glide.Glide
+import com.bumptech.glide.Priority
 import com.bumptech.glide.RequestManager
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.request.target.CustomViewTarget
+import com.bumptech.glide.request.target.Target
 import com.bumptech.glide.request.transition.Transition
+import java.io.File
 
 internal class HeaderImageActivity : AppCompatActivity() {
     private lateinit var binding: ActivityHeaderImageBinding
     private lateinit var images: List<ImagePage>
+    private lateinit var requests: RequestManager
+    private var cacheOnly = false
+    private var started = false
+    private var selectedPosition = 0
+    private var browseDirection = 1
+    private var preloadName: String? = null
+    private var preloadTarget: Target<File>? = null
     private val pageStates = mutableMapOf<ImagePage, PageState>()
     private var maskEnabled = true
     private var pendingPermissionImage: String? = null
     private val saveModel by lazy { ViewModelProvider(this)[HeaderImageSaveViewModel::class.java] }
 
     private val pages = object : ViewPager2.OnPageChangeCallback() {
-        override fun onPageSelected(position: Int) = updateControls()
-        override fun onPageScrollStateChanged(state: Int) = updateControls()
+        override fun onPageSelected(position: Int) {
+            if (position != selectedPosition) {
+                browseDirection = if (position > selectedPosition) 1 else -1
+                selectedPosition = position
+                if (preloadName != nextPreloadName()) clearPreload()
+            }
+            updateControls()
+            updatePreload()
+        }
+
+        override fun onPageScrollStateChanged(state: Int) {
+            updateControls()
+            updatePreload()
+        }
     }
 
     private val storagePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -58,6 +80,8 @@ internal class HeaderImageActivity : AppCompatActivity() {
             return
         }
         images = names.mapIndexed { index, name -> ImagePage(index.toLong(), name) }
+        requests = Glide.with(this)
+        cacheOnly = intent.getBooleanExtra(EXTRA_CACHE_ONLY, false)
         configureSystemBars()
         maskEnabled = savedInstanceState?.getBoolean(STATE_MASK, true) ?: true
         pendingPermissionImage = savedInstanceState?.getString(STATE_PERMISSION_IMAGE)
@@ -68,23 +92,28 @@ internal class HeaderImageActivity : AppCompatActivity() {
         binding.headerImageDownload.setOnClickListener { saveSelectedImage() }
         updateMask()
 
-        val initialPosition = savedInstanceState?.getInt(STATE_POSITION)
-            ?: intent.getIntExtra(EXTRA_POSITION, 0)
+        selectedPosition = (savedInstanceState?.getInt(STATE_POSITION)
+            ?: intent.getIntExtra(EXTRA_POSITION, 0)).coerceIn(images.indices)
+        browseDirection = savedInstanceState?.getInt(STATE_DIRECTION, 1) ?: 1
         binding.headerImagePager.apply {
+            offscreenPageLimit = 1
             adapter = ImagePages(
-                images, Glide.with(this@HeaderImageActivity),
-                cacheOnly = intent.getBooleanExtra(EXTRA_CACHE_ONLY, false),
+                images, requests, cacheOnly,
+                isSelected = { it == images.getOrNull(currentItem) },
                 onImageTap = {
                     maskEnabled = !maskEnabled
                     updateMask()
                 },
                 onState = { page, state ->
                     if (state == null) pageStates.remove(page) else pageStates[page] = state
-                    if (page == images.getOrNull(currentItem)) updateControls()
+                    if (page == images.getOrNull(currentItem)) {
+                        updateControls()
+                        updatePreload()
+                    }
                 },
             )
             registerOnPageChangeCallback(pages)
-            setCurrentItem(initialPosition.coerceIn(images.indices), false)
+            setCurrentItem(selectedPosition, false)
         }
         updateControls()
         saveModel.state.observe(this) { state ->
@@ -99,6 +128,54 @@ internal class HeaderImageActivity : AppCompatActivity() {
                 saveModel.consumeResult()
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        started = true
+        updatePreload()
+    }
+
+    override fun onStop() {
+        started = false
+        clearPreload()
+        super.onStop()
+    }
+
+    private fun nextPreloadName(): String? {
+        if (cacheOnly) return null
+        val position = selectedPosition + 2 * browseDirection
+        val page = images.getOrNull(position) ?: return null
+        if (HeaderImageSource.isLocal(page.name)) return null
+        // The same image can appear twice where two shuffled rounds meet.
+        return page.name.takeUnless { name ->
+            (-1..1).any { offset -> images.getOrNull(selectedPosition + offset)?.name == name }
+        }
+    }
+
+    private fun updatePreload() {
+        if (!started || !::binding.isInitialized) return
+        val pager = binding.headerImagePager
+        if (pager.scrollState != ViewPager2.SCROLL_STATE_IDLE ||
+            pager.currentItem != selectedPosition || pageStates[images[selectedPosition]] == null
+        ) return
+        val name = nextPreloadName()
+        if (name == preloadName) return
+        clearPreload()
+        if (name != null) {
+            preloadName = name
+            // Warm Glide's shared original-data cache without decoding another page.
+            preloadTarget = requests.downloadOnly()
+                .load(HeaderImageSource.model(name))
+                .timeout(HeaderImageSource.TIMEOUT_MS)
+                .preload()
+        }
+    }
+
+    private fun clearPreload() {
+        preloadTarget?.let(requests::clear)
+        preloadTarget = null
+        preloadName = null
     }
 
     @Suppress("DEPRECATION")
@@ -164,6 +241,7 @@ internal class HeaderImageActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         if (::binding.isInitialized) {
             outState.putInt(STATE_POSITION, binding.headerImagePager.currentItem)
+            outState.putInt(STATE_DIRECTION, browseDirection)
             outState.putBoolean(STATE_MASK, maskEnabled)
             outState.putString(STATE_PERMISSION_IMAGE, pendingPermissionImage)
         }
@@ -172,6 +250,7 @@ internal class HeaderImageActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (::binding.isInitialized) {
+            clearPreload()
             binding.headerImagePager.unregisterOnPageChangeCallback(pages)
             binding.headerImagePager.adapter = null
         }
@@ -186,6 +265,7 @@ internal class HeaderImageActivity : AppCompatActivity() {
         private val images: List<ImagePage>,
         private val requests: RequestManager,
         private val cacheOnly: Boolean,
+        private val isSelected: (ImagePage) -> Boolean,
         private val onImageTap: () -> Unit,
         private val onState: (ImagePage, PageState?) -> Unit,
     ) : RecyclerView.Adapter<ImagePages.Holder>() {
@@ -231,6 +311,7 @@ internal class HeaderImageActivity : AppCompatActivity() {
             }
             holder.target = target
             requests.load(HeaderImageSource.model(name))
+                .priority(if (isSelected(page)) Priority.HIGH else Priority.NORMAL)
                 .fitCenter().dontAnimate().skipMemoryCache(true)
                 .timeout(HeaderImageSource.TIMEOUT_MS)
                 .onlyRetrieveFromCache(cacheOnly && !isLocal)
@@ -255,6 +336,7 @@ internal class HeaderImageActivity : AppCompatActivity() {
         private const val EXTRA_POSITION = "header_initial_position"
         private const val EXTRA_CACHE_ONLY = "header_cache_only"
         private const val STATE_POSITION = "header_position"
+        private const val STATE_DIRECTION = "header_browse_direction"
         private const val STATE_MASK = "header_mask"
         private const val STATE_PERMISSION_IMAGE = "header_permission_image"
 
