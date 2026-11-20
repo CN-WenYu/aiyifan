@@ -14,6 +14,16 @@ import android.provider.MediaStore
 import android.view.View
 import androidx.lifecycle.ViewModelProvider
 import com.aiyifan.app.R
+import com.bumptech.glide.Glide
+import com.bumptech.glide.Priority
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.Options
+import com.bumptech.glide.load.data.DataFetcher
+import com.bumptech.glide.load.model.GlideUrl
+import com.bumptech.glide.load.model.ModelLoader
+import com.bumptech.glide.load.model.ModelLoaderFactory
+import com.bumptech.glide.load.model.MultiModelLoaderFactory
+import com.bumptech.glide.load.model.stream.HttpGlideUrlLoader
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -25,7 +35,9 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
@@ -73,27 +85,92 @@ class HeaderImageSaverTest {
         assertNull(provider.inserted)
     }
 
+    @Test fun `remote save copies original bytes and can repeat from disk cache offline`() {
+        val image = context.assets.open("mine_header/mine_header_001.webp").use { it.readBytes() }
+        var online = true
+        withRemoteImageLoader {
+            if (online && it.endsWith("/mine_header_002.webp")) image.inputStream()
+            else throw IOException("Simulated offline")
+        }.use {
+            val uri = saveOnWorker("mine_header_002.webp")
+            assertEquals("content://media/external/images/media/42", uri.toString())
+            assertArrayEquals(image, provider.file.readBytes())
+            assertEquals(0, provider.updated!!.getAsInteger(MediaStore.Images.Media.IS_PENDING))
+
+            online = false
+            assertTrue(provider.file.delete())
+            saveOnWorker("mine_header_002.webp")
+            assertArrayEquals(image, provider.file.readBytes())
+            assertEquals(2, provider.insertCount)
+        }
+    }
+
+    @Test fun `remote failure creates no gallery item`() {
+        withRemoteImageLoader { throw IOException("Simulated offline") }.use {
+            val error = assertThrows(java.util.concurrent.ExecutionException::class.java) {
+                saveOnWorker("mine_header_003.webp")
+            }
+            assertTrue(error.cause is IOException)
+            assertNull(provider.inserted)
+        }
+    }
+
+    private fun saveOnWorker(name: String): Uri {
+        val executor = Executors.newSingleThreadExecutor()
+        return try {
+            executor.submit<Uri> { HeaderImageSaver.save(context, name) }.get(10, TimeUnit.SECONDS)
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    private fun withRemoteImageLoader(open: (String) -> InputStream): AutoCloseable {
+        val registry = Glide.get(context).registry
+        registry.replace(GlideUrl::class.java, InputStream::class.java,
+            object : ModelLoaderFactory<GlideUrl, InputStream> {
+                override fun build(multiFactory: MultiModelLoaderFactory) =
+                    object : ModelLoader<GlideUrl, InputStream> {
+                        override fun handles(model: GlideUrl) = true
+                        override fun buildLoadData(model: GlideUrl, width: Int, height: Int, options: Options) =
+                            ModelLoader.LoadData(model, object : DataFetcher<InputStream> {
+                                override fun loadData(priority: Priority, callback: DataFetcher.DataCallback<in InputStream>) {
+                                    try {
+                                        callback.onDataReady(open(model.toStringUrl()))
+                                    } catch (failure: IOException) {
+                                        callback.onLoadFailed(failure)
+                                    }
+                                }
+                                override fun cleanup() = Unit
+                                override fun cancel() = Unit
+                                override fun getDataClass() = InputStream::class.java
+                                override fun getDataSource() = DataSource.REMOTE
+                            })
+                    }
+                override fun teardown() = Unit
+            })
+        return AutoCloseable {
+            registry.replace(GlideUrl::class.java, InputStream::class.java, HttpGlideUrlLoader.Factory())
+        }
+    }
+
     @Test fun `save survives viewer recreation and rejects duplicate requests`() {
         provider.allowWrite = CountDownLatch(1)
-        val controller = openHeaderImageSheet()
-        fun button() = controller.get().imageSheet().requireView().findViewWithTag<View>("header_image_download")
+        val controller = openHeaderImageActivity()
+        fun button() = controller.get().findViewById<View>(R.id.header_image_download)
         try {
+            controller.get().awaitImageSaveEnabled()
             button().performClick()
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue(provider.writeStarted.await(5, TimeUnit.SECONDS))
-            val model = ViewModelProvider(controller.get().imageSheet())[HeaderImageSaveViewModel::class.java]
+            val model = ViewModelProvider(controller.get())[HeaderImageSaveViewModel::class.java]
             assertFalse(button().isEnabled)
             model.save(context, "mine_header_001.webp")
             controller.recreate()
-            assertSame(model, ViewModelProvider(controller.get().imageSheet())[HeaderImageSaveViewModel::class.java])
+            controller.get().layoutImageViewport()
+            assertSame(model, ViewModelProvider(controller.get())[HeaderImageSaveViewModel::class.java])
             assertFalse(button().isEnabled)
             provider.allowWrite!!.countDown()
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-            while (!button().isEnabled && System.nanoTime() < deadline) {
-                Thread.sleep(10)
-                shadowOf(Looper.getMainLooper()).idle()
-            }
-            assertTrue(button().isEnabled)
+            controller.get().awaitImageSaveEnabled()
             assertEquals(1, provider.insertCount)
             assertEquals(0, provider.updated!!.getAsInteger(MediaStore.Images.Media.IS_PENDING))
         } finally {
@@ -113,9 +190,10 @@ class HeaderImageSaverTest {
     }
 
     @Test @Config(sdk = [28]) fun `legacy permission denial does not save an image`() {
-        val controller = openHeaderImageSheet()
+        val controller = openHeaderImageActivity()
         try {
-            controller.get().imageSheet().requireView().findViewWithTag<View>("header_image_download").performClick()
+            controller.get().awaitImageSaveEnabled()
+            controller.get().findViewById<View>(R.id.header_image_download).performClick()
             val request = shadowOf(controller.get()).lastRequestedPermission
             assertArrayEquals(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), request.requestedPermissions)
             controller.get().onRequestPermissionsResult(request.requestCode, request.requestedPermissions,

@@ -25,6 +25,8 @@ internal class HeaderCarousel(
     private val requests: RequestManager,
     private val images: List<String>,
     private val state: HeaderSlideshow,
+    private val availability: HeaderImageAvailability,
+    private val localIndices: List<Int>,
     first: HeaderSlideView,
     second: HeaderSlideView,
     private val decodeHeight: () -> Int,
@@ -52,11 +54,59 @@ internal class HeaderCarousel(
     private var viewerOpen = false
     val canExpand get() = running && ready && !viewerOpen
     private val advance = Runnable {
-        if (state.tick(SystemClock.uptimeMillis())) {
+        val now = SystemClock.uptimeMillis()
+        retryBeforeAdvance(now)
+        if (state.tick(now)) {
             direction = 1
             awaitingNext = true
+            ensureCandidate(direction)
             beginPreparedTransition()
         }
+    }
+
+    fun updateNetwork(online: Boolean, retryOnEntry: Boolean = false) {
+        val wasRemote = availability.useRemote
+        availability.setOnline(online)
+        if (retryOnEntry) {
+            availability.retryOnEntry()
+            state.retryFailedSlides()
+        }
+        if (wasRemote != availability.useRemote) {
+            settleAnimation()
+            changePool(resumeAdvance = awaitingNext)
+            if (ready && !touching && !awaitingNext && animation == null) {
+                schedule()
+            }
+        }
+    }
+
+    private fun retryBeforeAdvance(now: Long) {
+        val wasRemote = availability.useRemote
+        availability.beforeAdvance(now)
+        if (wasRemote != availability.useRemote) changePool(resumeAdvance = false)
+    }
+
+    private fun changePool(resumeAdvance: Boolean) {
+        cancelPendingLoad()
+        state.updatePool(
+            if (availability.useRemote) images.indices.toList() else localIndices,
+            keepCurrent = ready || state.hasDisplayedCurrent,
+        )
+        if (!running) return
+        if (!ready) {
+            load(slots[current], state.index, next = false)
+        } else if (resumeAdvance) {
+            if (state.requestManual(direction)) {
+                awaitingNext = true
+                ensureCandidate(direction)
+            } else {
+                animateSlides(commit = false)
+            }
+        } else if (touching) {
+            slots[current].view.translationX = 0f
+            ensureCandidate(direction)
+        }
+        onChanged()
     }
 
     fun start() {
@@ -106,6 +156,7 @@ internal class HeaderCarousel(
             schedule()
             return
         }
+        if (switchImage && dragOffset != 0f && direction == 1) retryBeforeAdvance(SystemClock.uptimeMillis())
         if (switchImage && dragOffset != 0f && state.requestManual(direction)) {
             awaitingNext = true
             ensureCandidate(direction)
@@ -171,6 +222,8 @@ internal class HeaderCarousel(
         val view = slot.view
         val targetWidth = view.width
         val targetHeight = decodeHeight()
+        val name = images[index]
+        val remote = !HeaderImageSource.isLocal(name)
         view.visibility = if (next) View.INVISIBLE else View.VISIBLE
         val target = object : CustomTarget<Bitmap>(targetWidth, targetHeight) {
             override fun onResourceReady(resource: Bitmap, transition: Transition<in Bitmap>?) {
@@ -190,6 +243,7 @@ internal class HeaderCarousel(
                         thumb.setPixels(blurred, 0, thumb.width, 0, 0, thumb.width, thumb.height)
                         handler.post {
                             if (running && slot.generation == version) {
+                                if (remote) availability.remoteLoaded()
                                 view.setBlurred(thumb)
                                 if (next) {
                                     loadingIndex = null
@@ -210,6 +264,14 @@ internal class HeaderCarousel(
             override fun onLoadFailed(errorDrawable: Drawable?) {
                 handler.post {
                     if (running && slot.generation == version) {
+                        if (remote && availability.useRemote) {
+                            availability.remoteFailed(SystemClock.uptimeMillis())
+                            if (!availability.useRemote) {
+                                changePool(resumeAdvance = awaitingNext)
+                                if (ready && !touching && !awaitingNext) schedule()
+                                return@post
+                            }
+                        }
                         if (next) {
                             loadingIndex = null
                             val replacement = state.rejectNext(index, requestedDirection)
@@ -237,9 +299,13 @@ internal class HeaderCarousel(
             }
         }
         slot.target = target
-        requests.asBitmap().load("file:///android_asset/mine_header/${images[index]}")
+        requests.asBitmap().load(HeaderImageSource.model(name))
             .override(targetWidth, targetHeight).centerCrop().disallowHardwareConfig().dontAnimate()
-            .skipMemoryCache(true).diskCacheStrategy(DiskCacheStrategy.NONE).into(target)
+            .timeout(HeaderImageSource.TIMEOUT_MS)
+            .onlyRetrieveFromCache(remote && !availability.useRemote)
+            .skipMemoryCache(true)
+            .diskCacheStrategy(if (remote) DiskCacheStrategy.DATA else DiskCacheStrategy.NONE)
+            .into(target)
     }
 
     private fun beginPreparedTransition() {
@@ -301,9 +367,10 @@ internal class HeaderCarousel(
     private fun schedule() {
         handler.removeCallbacks(advance)
         if (running && !touching && !viewerOpen && ready && !state.paused && !state.exhausted && state.pendingIndex == null) {
-            handler.postDelayed(advance, HeaderSlideshow.INTERVAL_MS)
+            val candidate = state.nextCandidate ?: return
+            state.advanceAt?.let { handler.postAtTime(advance, it) }
             if (loadingIndex == null && preparedIndex == null) {
-                state.nextCandidate?.let { load(slots[1 - current], it, next = true) }
+                load(slots[1 - current], candidate, next = true)
             }
         }
     }

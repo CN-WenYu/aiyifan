@@ -1,6 +1,9 @@
 package com.aiyifan.app.feature.mine
 
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -26,10 +29,20 @@ class MineFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var slideshow: HeaderSlideshow
-    private var images = emptyList<String>()
+    private lateinit var availability: HeaderImageAvailability
+    private val images = HeaderImageSource.allNames
+    private val localIndices = images.indices.filter { HeaderImageSource.isLocal(images[it]) }
+    private val connectivity get() = requireContext().getSystemService(ConnectivityManager::class.java)
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var hasResumed = false
+    private var viewerLaunched = false
     private var carousel: HeaderCarousel? = null
     private var headerExpanded = false
     private var topInset = 0
+    private var headerWasBehindStatusBar = true
+    private val headerLayoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+        updateHeaderStatusBar()
+    }
     private var windowRoot: View? = null
     private val windowLayoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
         if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
@@ -40,19 +53,27 @@ class MineFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         headerExpanded = savedInstanceState?.getBoolean("header_expanded") ?: false
-        images = requireContext().assets.list("mine_header").orEmpty()
-            .filter { it.endsWith(".webp") }.sorted()
+        hasResumed = savedInstanceState?.getBoolean("header_retry_on_resume") ?: false
+        viewerLaunched = savedInstanceState?.getBoolean("header_viewer_launched") ?: false
+        availability = HeaderImageAvailability(
+            online = connectivity.hasInternetNetwork(),
+            retryAt = savedInstanceState?.getLong("header_retry_at", -1L)?.takeIf { it >= 0 },
+        )
         slideshow = HeaderSlideshow(
-            images.size,
-            savedInstanceState?.getInt("header_index") ?: 0,
-            savedInstanceState?.getBoolean("header_paused") ?: false,
+            count = images.size,
+            initialPaused = savedInstanceState?.getBoolean("header_paused") ?: false,
+            initialPool = if (availability.useRemote) images.indices.toList() else localIndices,
+            restored = savedInstanceState?.getBundle("header_order")?.restoreHeaderOrder(),
         )
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putInt("header_index", slideshow.index)
+        outState.putBundle("header_order", slideshow.snapshot().toBundle())
+        availability.retryAt?.let { outState.putLong("header_retry_at", it) }
         outState.putBoolean("header_paused", slideshow.paused)
         outState.putBoolean("header_expanded", headerExpanded)
+        outState.putBoolean("header_retry_on_resume", hasResumed && isHidden)
+        outState.putBoolean("header_viewer_launched", viewerLaunched)
         super.onSaveInstanceState(outState)
     }
 
@@ -63,6 +84,8 @@ class MineFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         windowRoot = requireActivity().window.decorView
+        binding.root.setOnScrollChangeListener { _, _, _, _, _ -> updateHeaderStatusBar() }
+        binding.mineHeader.addOnLayoutChangeListener(headerLayoutListener)
         configureExpansion(reload = false)
         binding.mineHeader.restoreExpanded(headerExpanded)
         headerExpanded = binding.mineHeader.expanded
@@ -76,17 +99,14 @@ class MineFragment : Fragment() {
         ViewCompat.setOnApplyWindowInsetsListener(binding.mineHeader) { _, insets ->
             topInset = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()).top
             configureExpansion()
+            updateHeaderStatusBar()
             insets
         }
         ViewCompat.requestApplyInsets(binding.mineHeader)
         carousel = HeaderCarousel(
-            Glide.with(this), images, slideshow, binding.headerImage, binding.headerNextImage,
-            { binding.mineHeader.expandedHeightPx }, ::updatePlayback,
+            Glide.with(this), images, slideshow, availability, localIndices,
+            binding.headerImage, binding.headerNextImage, { binding.mineHeader.expandedHeightPx }, ::updatePlayback,
         )
-        carousel?.setViewerOpen(childFragmentManager.findFragmentByTag(HeaderImageSheet.TAG) != null)
-        childFragmentManager.setFragmentResultListener(HeaderImageSheet.TAG, viewLifecycleOwner) { _, _ ->
-            carousel?.setViewerOpen(false)
-        }
         binding.mineHeader.listener = object : HeaderGestureLayout.Listener {
             override fun onTouchStart() { carousel?.beginTouch() }
             override fun onHorizontalDrag(offset: Float) { carousel?.drag(offset) }
@@ -96,9 +116,14 @@ class MineFragment : Fragment() {
         windowRoot?.addOnLayoutChangeListener(windowLayoutListener)
         binding.headerPlayback.setOnClickListener { carousel?.togglePause() }
         binding.headerExpand.setOnClickListener {
-            if (childFragmentManager.isStateSaved) return@setOnClickListener
             val index = carousel?.prepareViewer() ?: return@setOnClickListener
-            HeaderImageSheet.newInstance(images[index]).show(childFragmentManager, HeaderImageSheet.TAG)
+            val order = slideshow.previewOrder()
+            viewerLaunched = true
+            startActivity(
+                HeaderImageActivity.intent(
+                    requireContext(), order.map(images::get), order.indexOf(index), cacheOnly = !availability.useRemote,
+                ),
+            )
         }
         updatePlayback()
         val themePreferenceStore = ThemePreferenceStore(requireContext())
@@ -126,10 +151,68 @@ class MineFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         if (_binding != null) {
+            observeHeaderNetwork()
+            carousel?.updateNetwork(connectivity.hasInternetNetwork(), retryOnEntry = hasResumed && !viewerLaunched)
+            carousel?.setViewerOpen(false)
+            viewerLaunched = false
+            hasResumed = true
             configureExpansion()
             refreshPresentation(ThemePreferenceStore(requireContext()))
             binding.headerImage.doOnLayout { if (_binding != null && isResumed) carousel?.start() }
         }
+    }
+
+    internal fun headerCoversStatusBar(): Boolean {
+        val views = _binding ?: return true
+        if (!views.mineHeader.isLaidOut) return true
+        return views.mineHeader.bottom - views.root.scrollY >= topInset.coerceAtLeast(1)
+    }
+
+    private fun updateHeaderStatusBar() {
+        val covers = headerCoversStatusBar()
+        if (covers == headerWasBehindStatusBar) return
+        headerWasBehindStatusBar = covers
+        windowRoot?.let(ViewCompat::requestApplyInsets)
+    }
+
+    private fun observeHeaderNetwork() {
+        val manager = connectivity
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = update()
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) = update()
+            override fun onLost(network: Network) = update()
+
+            private fun update() {
+                activity?.runOnUiThread {
+                    if (networkCallback === this) carousel?.updateNetwork(manager.hasInternetNetwork())
+                }
+            }
+        }
+        networkCallback = callback
+        manager.registerDefaultNetworkCallback(callback)
+    }
+
+    private fun ConnectivityManager.hasInternetNetwork(): Boolean =
+        getNetworkCapabilities(activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+    private fun Bundle.restoreHeaderOrder(): HeaderSlideshow.Snapshot? {
+        return HeaderSlideshow.Snapshot(
+            pool = getIntArray("pool")?.toList() ?: return null,
+            index = getInt("index", -1),
+            history = getIntArray("history")?.toList() ?: return null,
+            cursor = getInt("cursor", -1),
+            remaining = getIntArray("remaining")?.toList() ?: return null,
+            failures = getIntArray("failures")?.toList() ?: return null,
+        )
+    }
+
+    private fun HeaderSlideshow.Snapshot.toBundle() = Bundle().apply {
+        putIntArray("pool", pool.toIntArray())
+        putInt("index", index)
+        putIntArray("history", history.toIntArray())
+        putInt("cursor", cursor)
+        putIntArray("remaining", remaining.toIntArray())
+        putIntArray("failures", failures.toIntArray())
     }
 
     private fun refreshPresentation(themePreferenceStore: ThemePreferenceStore) {
@@ -160,6 +243,8 @@ class MineFragment : Fragment() {
     }
 
     override fun onPause() {
+        networkCallback?.let(connectivity::unregisterNetworkCallback)
+        networkCallback = null
         _binding?.mineHeader?.cancelInteraction()
         carousel?.stop()
         super.onPause()
@@ -179,6 +264,8 @@ class MineFragment : Fragment() {
     override fun onDestroyView() {
         windowRoot?.removeOnLayoutChangeListener(windowLayoutListener)
         windowRoot = null
+        _binding?.root?.setOnScrollChangeListener(null as View.OnScrollChangeListener?)
+        _binding?.mineHeader?.removeOnLayoutChangeListener(headerLayoutListener)
         _binding?.mineHeader?.cancelInteraction()
         _binding?.mineHeader?.listener = null
         _binding?.mineHeader?.scrollPageTowardTop = null

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/header_image_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/header_image_pager"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:saveEnabled="false" />
+
+    <View
+        android:id="@+id/header_image_mask"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:importantForAccessibility="no"
+        android:tag="header_image_mask" />
+
+    <TextView
+        android:id="@+id/header_image_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:accessibilityLiveRegion="polite"
+        android:text="@string/mine_image_unavailable"
+        android:textColor="@android:color/white"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/header_image_controls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:orientation="horizontal"
+        android:padding="@dimen/dp_8">
+
+        <ImageButton
+            android:id="@+id/header_image_download"
+            android:layout_width="@dimen/dp_48"
+            android:layout_height="@dimen/dp_48"
+            android:background="@drawable/bg_mine_header_control"
+            android:contentDescription="@string/mine_save_image"
+            android:enabled="false"
+            android:src="@drawable/ic_download"
+            android:tag="header_image_download" />
+
+        <ImageButton
+            android:id="@+id/header_image_close"
+            android:layout_width="@dimen/dp_48"
+            android:layout_height="@dimen/dp_48"
+            android:background="@drawable/bg_mine_header_control"
+            android:contentDescription="@string/mine_close_image"
+            android:src="@drawable/ic_close" />
+    </LinearLayout>
+</FrameLayout>

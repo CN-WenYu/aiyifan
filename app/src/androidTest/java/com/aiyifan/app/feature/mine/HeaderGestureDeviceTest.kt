@@ -125,12 +125,16 @@ class HeaderGestureDeviceTest {
             scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select() }
             await(scenario) { it.findViewById<ImageButton>(R.id.headerExpand).isEnabled }
             scenario.onActivity { it.findViewById<ImageButton>(R.id.headerPlayback).performClick() }
+            var initial = -1
+            var next = -1
+            scenario.onActivity { initial = state(it).index }
             swipe(scenario, -0.4f, 4f)
-            await(scenario) { state(it).index == 1 }
+            await(scenario) { state(it).index != initial }
+            scenario.onActivity { next = state(it).index }
             swipe(scenario, 0.4f, 0f)
-            await(scenario) { state(it).index == 0 }
-            swipe(scenario, 0.4f, 0f)
-            await(scenario) { state(it).index == 187 }
+            await(scenario) { state(it).index == initial }
+            swipe(scenario, -0.4f, 0f)
+            await(scenario) { state(it).index == next }
             scenario.onActivity { assertTrue(state(it).paused) }
             swipe(scenario, 0.02f, 60f)
             await(scenario) {
@@ -144,7 +148,7 @@ class HeaderGestureDeviceTest {
                 assertTrue(header.expanded)
                 assertEquals(header.expandedHeightPx, header.height)
                 assertTrue(state(it).paused)
-                assertEquals(187, state(it).index)
+                assertEquals(next, state(it).index)
             }
             swipe(scenario, 0f, -60f)
             await(scenario) {
@@ -159,6 +163,8 @@ class HeaderGestureDeviceTest {
             scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select() }
             await(scenario) { it.findViewById<ImageButton>(R.id.headerExpand).isEnabled }
             scenario.onActivity { it.findViewById<ImageButton>(R.id.headerPlayback).performClick() }
+            var initial = -1
+            scenario.onActivity { initial = state(it).index }
             repeat(8) {
                 scenario.onActivity { activity ->
                     val header = activity.findViewById<HeaderGestureLayout>(R.id.mineHeader)
@@ -174,7 +180,7 @@ class HeaderGestureDeviceTest {
             }
             SystemClock.sleep(700)
             scenario.onActivity {
-                assertEquals(0, state(it).index)
+                assertEquals(initial, state(it).index)
                 assertTrue(state(it).paused)
                 assertFalse(it.findViewById<HeaderGestureLayout>(R.id.mineHeader).expanded)
             }

@@ -27,35 +27,20 @@ class MineBottomSheetTest {
     @Before fun enableOnlineSession() { StartupSession.mode = AppMode.ONLINE }
     @After fun clearOnlineSession() { StartupSession.mode = null }
 
-    @Test fun themeAndImageOpenAtTheBottomOfTheSamePage() {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
+    @Test fun themeSettingsOpenAtTheBottomOfTheSamePage() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity {
                 it.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_MINE)!!.select()
+                it.findViewById<View>(R.id.themeSettingsButton).performClick()
             }
-            instrumentation.waitForIdleSync()
-            scenario.onActivity { it.findViewById<View>(R.id.themeSettingsButton).performClick() }
             assertBottomSheet(scenario, "theme-sheet.png")
-            instrumentation.uiAutomation.executeShellCommand("input keyevent KEYCODE_BACK").close()
-            val deadline = System.currentTimeMillis() + 10_000
-            var opened = false
-            while (!opened && System.currentTimeMillis() < deadline) {
-                scenario.onActivity {
-                    val expand = it.findViewById<View>(R.id.headerExpand)
-                    if (expand.isEnabled) opened = expand.performClick()
-                }
-                if (!opened) Thread.sleep(50)
-            }
-            assertTrue("Image preview must be available", opened)
-            assertBottomSheet(scenario, "image-sheet.png", waitForImage = true)
         }
     }
 
     private fun assertBottomSheet(
         scenario: ActivityScenario<MainActivity>,
         screenshot: String,
-        waitForImage: Boolean = false,
     ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
@@ -67,8 +52,7 @@ class MineBottomSheetTest {
             scenario.onActivity { activity ->
                 val sheet = WindowInspector.getGlobalWindowViews()
                     .firstNotNullOfOrNull { it.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet) }
-                val image = sheet?.findViewWithTag<ZoomImageView>("header_zoom_image")
-                visible = sheet?.getGlobalVisibleRect(bounds) == true && (!waitForImage || image?.drawable != null)
+                visible = sheet?.getGlobalVisibleRect(bounds) == true
                 val decor = activity.window.decorView
                 windowBottom = IntArray(2).also(decor::getLocationOnScreen)[1] + decor.height
             }

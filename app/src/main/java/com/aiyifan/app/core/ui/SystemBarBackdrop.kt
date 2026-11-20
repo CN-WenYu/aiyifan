@@ -15,6 +15,12 @@ internal class SystemBarBackdrop(
     private val paint = Paint()
     private var status = Insets.NONE
     private var navigation = Insets.NONE
+    var showStatusBackdrop = true
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidateSelf()
+        }
 
     fun update(insets: WindowInsetsCompat) {
         val newStatus = insets.getInsets(WindowInsetsCompat.Type.statusBars())
@@ -26,7 +32,7 @@ internal class SystemBarBackdrop(
     }
 
     override fun draw(canvas: Canvas) {
-        drawEdges(canvas, status, pageColor)
+        if (showStatusBackdrop) drawEdges(canvas, status, pageColor)
         drawEdges(canvas, navigation, navigationColor)
     }
 

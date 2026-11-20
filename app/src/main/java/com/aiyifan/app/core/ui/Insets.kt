@@ -12,10 +12,11 @@ import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import com.aiyifan.app.R
 
-fun Activity.setupEdgeToEdge() = window.setupPageSystemBars()
+fun Activity.setupEdgeToEdge(statusBarOverContent: () -> Boolean = { false }) =
+    window.setupPageSystemBars(statusBarOverContent)
 
 @Suppress("DEPRECATION")
-fun Window.setupPageSystemBars() {
+fun Window.setupPageSystemBars(statusBarOverContent: () -> Boolean = { false }) {
     val decor = decorView
     val pageColor = decor.context.getColor(R.color.page_bg)
     val useDarkIcons = usesLightSystemBarIcons(decor.resources.configuration.uiMode)
@@ -32,10 +33,26 @@ fun Window.setupPageSystemBars() {
         isStatusBarContrastEnforced = false
         isNavigationBarContrastEnforced = false
     }
-    WindowCompat.getInsetsController(this, decor).apply {
-        isAppearanceLightStatusBars = useDarkIcons
-        isAppearanceLightNavigationBars = useDarkIcons
+    val controller = WindowCompat.getInsetsController(this, decor)
+    fun updateStatusIcons(dark: Boolean) {
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.R) {
+            // Android 11 still merges the legacy status appearance into the window policy.
+            val flag = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            val current = decor.systemUiVisibility
+            decor.systemUiVisibility = if (dark) current or flag else current and flag.inv()
+        } else {
+            controller.isAppearanceLightStatusBars = dark
+        }
     }
+
+    if (Build.VERSION.SDK_INT == Build.VERSION_CODES.R) {
+        val flag = View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        val current = decor.systemUiVisibility
+        decor.systemUiVisibility = if (useDarkIcons) current or flag else current and flag.inv()
+    } else {
+        controller.isAppearanceLightNavigationBars = useDarkIcons
+    }
+    updateStatusIcons(useDarkIcons && !statusBarOverContent())
 
     // Android 15+ draws transparent system bars over the app. Paint the inset areas
     // independently of the page so headers, sheet surfaces and video can keep their colors.
@@ -46,6 +63,9 @@ fun Window.setupPageSystemBars() {
         backdrop.setBounds(0, 0, view.width, view.height)
     }
     ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
+        val overContent = statusBarOverContent()
+        backdrop.showStatusBackdrop = !overContent
+        decor.post { updateStatusIcons(useDarkIcons && !statusBarOverContent()) }
         backdrop.update(insets)
         ViewCompat.onApplyWindowInsets(view, insets)
     }

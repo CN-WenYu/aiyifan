@@ -56,7 +56,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
         super.onCreate(savedInstanceState)
-        setupEdgeToEdge()
+        setupEdgeToEdge {
+            ::binding.isInitialized && binding.bottomTabs.selectedTabPosition == TAB_MINE &&
+                (supportFragmentManager.findFragmentByTag(MineFragment::class.java.name) as? MineFragment)
+                    ?.headerCoversStatusBar() != false
+        }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         // Mine's header handles its own top inset.
@@ -92,7 +96,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {
                 updateTabTextSizes(tab.position)
                 show(fragmentFor(tab.position))
-                ViewCompat.requestApplyInsets(binding.fragmentContainer)
+                ViewCompat.requestApplyInsets(window.decorView)
             }
 
             override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) = Unit

@@ -76,6 +76,10 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
         <activity
+            android:name=".feature.mine.HeaderImageActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Aiyifan.HeaderImage" />
+        <activity
             android:name=".feature.main.MainActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
