@@ -81,6 +81,7 @@ class VideoPlaybackController(
     private val clock: () -> Long = System::currentTimeMillis,
     private val offlineCatalog: OfflinePlaybackCatalog? = null,
     monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
+    private val seriesSkipTimes: (String) -> SeriesSkipTimes = { SeriesSkipTimes() },
 ) {
     private val sleepTimer = SleepTimer(monotonicClock)
     private var stoppedForSleep = false
@@ -123,10 +124,13 @@ class VideoPlaybackController(
 
     private var activeDetail: VideoDetail? = null
     private var activeEpisode: Episode? = null
+    private var activeSkipTimes = SeriesSkipTimes()
+    private var pendingInitialIntro = false
     private var released = false
     private var paused = false
     private var replacingMedia = false
     private var endedAdvanceEpisodeKey: String? = null
+    private var automaticAdvanceAtEnd = false
     private var requestVersion = 0L
     private var lastSaveAt = 0L
     private var lastPlayWhenReady = engine.playWhenReady
@@ -147,7 +151,11 @@ class VideoPlaybackController(
             if (engine.playWhenReady && !lastPlayWhenReady) stoppedForSleep = false
             // Leaving the ended state (for example, replaying after a failed request)
             // starts a new completion attempt without retrying repeated ended callbacks.
-            if (!engine.hasEnded) endedAdvanceEpisodeKey = null
+            if (!engine.hasEnded && automaticAdvanceAtEnd) {
+                endedAdvanceEpisodeKey = null
+                automaticAdvanceAtEnd = false
+            }
+            applyPendingIntro()
             if (engine.playWhenReady && !canPlay()) pause()
             else {
                 if (lastPlayWhenReady != engine.playWhenReady) paused = !engine.playWhenReady
@@ -158,9 +166,16 @@ class VideoPlaybackController(
         }
     }
     private val removeProgressListener = engine.addPositionListener {
+        applyPendingIntro()
         if (clock() - lastSaveAt >= 5_000L) saveHistory()
     }
-    private val removeSeekListener = engine.addSeekListener(::saveHistory)
+    private val removeSeekListener = engine.addSeekListener {
+        if (!replacingMedia) {
+            pendingInitialIntro = false
+            saveHistory()
+            notifyState()
+        }
+    }
 
     /** Claims this shared controller when navigating between two video pages. */
     fun openVideo(mediaKey: String, offlineDownloadId: String? = null) {
@@ -173,6 +188,8 @@ class VideoPlaybackController(
         isLoading = false
         pendingEpisode = null
         endedAdvanceEpisodeKey = null
+        automaticAdvanceAtEnd = false
+        pendingInitialIntro = false
         requestedMediaKey = mediaKey
         requestedOfflineDownloadId = offlineDownloadId
         offlineSession = offlineDownloadId != null
@@ -222,6 +239,15 @@ class VideoPlaybackController(
         startPositionMs: Long = 0L,
         shouldPlay: Boolean = true,
         offlineDownloadId: String? = null,
+    ): Boolean = prepareEpisode(detail, episode, startPositionMs, shouldPlay, offlineDownloadId, applyIntro = false)
+
+    private fun prepareEpisode(
+        detail: VideoDetail,
+        episode: Episode,
+        startPositionMs: Long,
+        shouldPlay: Boolean = true,
+        offlineDownloadId: String? = null,
+        applyIntro: Boolean = true,
     ): Boolean {
         val mediaUrl = episode.mediaUrl?.trim().orEmpty()
         if (released || mediaUrl.isBlank()) return false
@@ -232,6 +258,7 @@ class VideoPlaybackController(
         isLoading = false
         pendingEpisode = null
         endedAdvanceEpisodeKey = null
+        automaticAdvanceAtEnd = false
         replacingMedia = true
         try {
             if (offlineDownloadId == null) engine.setMediaUrl(mediaUrl) else engine.setOfflineMedia(offlineDownloadId)
@@ -240,8 +267,16 @@ class VideoPlaybackController(
             offlineLoadFailed = false
             activeDetail = detail
             activeEpisode = episode
+            activeSkipTimes = seriesSkipTimes(detail.mediaKey)
+            val autoSkip = applyIntro && skipIntro()
+            pendingInitialIntro = autoSkip && startPositionMs <= 0L && activeSkipTimes.introSeconds > 0L
             engine.prepare()
-            if (startPositionMs > 0L) engine.seekTo(startPositionMs)
+            if (pendingInitialIntro) {
+                applyPendingIntro()
+            } else {
+                val positionMs = AutoSkipPolicy.initialPositionMs(startPositionMs, episode.opSecond, autoSkip)
+                if (positionMs > 0L) engine.seekTo(positionMs)
+            }
             if (shouldPlay && !paused && !stoppedForSleep && canPlay()) engine.play() else engine.pause()
             paused = !engine.playWhenReady
             lastPlayWhenReady = engine.playWhenReady
@@ -252,6 +287,18 @@ class VideoPlaybackController(
         notifyState()
         return true
     }
+
+    private fun applyPendingIntro() {
+        if (!pendingInitialIntro || !engine.isReady || durationMs <= 0L) return
+        pendingInitialIntro = false
+        val episode = activeEpisode ?: return
+        if (!skipIntro() || engine.hasEnded) return
+        val introMs = episodeTimes(episode).introMs
+        if (introMs > 0L) engine.seekTo(introMs)
+    }
+
+    private fun episodeTimes(episode: Episode) =
+        AutoSkipPolicy.episodeTimes(durationMs, episode.opSecond, episode.epSecond, activeSkipTimes)
 
     fun attach(playerView: PlayerView) {
         if (!released) engine.attach(playerView)
@@ -285,6 +332,7 @@ class VideoPlaybackController(
 
     fun seekTo(positionMs: Long) {
         if (isPrepared) {
+            pendingInitialIntro = false
             engine.seekTo(positionMs.coerceAtLeast(0L))
             saveHistory()
         }
@@ -297,30 +345,68 @@ class VideoPlaybackController(
         seekTo(position + offsetMs.coerceIn(-position, duration - position))
     }
 
-    suspend fun switchEpisode(offset: Int): EpisodeSwitchResult {
-        val detail = activeDetail ?: return EpisodeSwitchResult.Unavailable
-        val activeEpisode = activeEpisode ?: return EpisodeSwitchResult.Unavailable
+    private fun adjacentEpisode(detail: VideoDetail, episode: Episode, offset: Int): Episode? {
         val episodes = detail.episodes
-        val activeIndex = episodes.indexOfFirst { it.episodeKey == activeEpisode.episodeKey }
-        if (activeIndex < 0 || offset !in listOf(-1, 1)) return EpisodeSwitchResult.Unavailable
-        val targetEpisode = episodes.getOrNull(activeIndex + offset) ?: return EpisodeSwitchResult.Unavailable
+        val activeIndex = episodes.indexOfFirst { it.episodeKey == episode.episodeKey }
+        return if (activeIndex < 0) null else episodes.getOrNull(activeIndex + offset)
+    }
+
+    suspend fun switchEpisode(offset: Int): EpisodeSwitchResult {
+        val (detail, episode) = activeSession ?: return EpisodeSwitchResult.Unavailable
+        if (offset != -1 && offset != 1) return EpisodeSwitchResult.Unavailable
+        val targetEpisode = adjacentEpisode(detail, episode, offset) ?: return EpisodeSwitchResult.Unavailable
         return loadEpisode(detail, targetEpisode)
     }
 
     suspend fun advanceToNextEpisodeIfEnded(): EpisodeSwitchResult = advanceAutomatically()
 
+    private data class AutomaticTransition(
+        val session: ActivePlaybackSession,
+        val next: Episode,
+        val downloadId: String?,
+        val outroStartMs: Long?,
+    )
+
+    private fun automaticTransition(): AutomaticTransition? {
+        if (released || replacingMedia || isLoading || stoppedForSleep || paused ||
+            sleepTimer.state.option == SleepTimerOption.END_OF_EPISODE
+        ) return null
+        val session = activeSession ?: return null
+        val alreadyAttempted = endedAdvanceEpisodeKey == session.episode.episodeKey
+        if (alreadyAttempted && automaticAdvanceAtEnd) return null
+        val next = adjacentEpisode(session.detail, session.episode, 1) ?: return null
+        val downloadId = if (isOffline) {
+            offlineCatalog?.completed(session.detail.mediaKey)
+                ?.firstOrNull { it.episode.episodeKey == next.episodeKey }?.id ?: return null
+        } else null
+        // After a failed early switch, give natural completion its own attempt.
+        val outroStartMs = if (!alreadyAttempted && skipIntro()) episodeTimes(session.episode).outroStartMs else null
+        return AutomaticTransition(session, next, downloadId, outroStartMs)
+    }
+
+    val showNextEpisodeHint: Boolean
+        get() {
+            if (!isPlaying || !engine.isReady || pendingInitialIntro) return false
+            val transition = automaticTransition() ?: return false
+            val remainingMs = (transition.outroStartMs ?: durationMs) - currentPositionMs
+            return remainingMs in 1L..10_000L
+        }
+
     /** Single automatic transition gate shared by every playback surface and outro skipping. */
     suspend fun advanceAutomatically(positionMs: Long? = null): EpisodeSwitchResult {
-        if (consumeSleepExpiry() || stoppedForSleep || paused) return EpisodeSwitchResult.Unavailable
-        val current = activeEpisode ?: return EpisodeSwitchResult.Unavailable
-        if (isLoading || endedAdvanceEpisodeKey == current.episodeKey) return EpisodeSwitchResult.Unavailable
+        if (consumeSleepExpiry()) return EpisodeSwitchResult.Unavailable
+        val transition = automaticTransition() ?: return EpisodeSwitchResult.Unavailable
         val ended = isPlaybackEnded
-        val skipOutro = positionMs != null && sleepTimer.state.option != SleepTimerOption.END_OF_EPISODE &&
-            AutoSkipPolicy.shouldAdvance(positionMs, current.epSecond, skipIntro(), true, false)
+        val skipOutro = positionMs != null && engine.isPlaying && engine.isReady && !pendingInitialIntro &&
+            transition.outroStartMs?.let { minOf(positionMs, currentPositionMs) >= it } == true
         if (!ended && !skipOutro) return EpisodeSwitchResult.Unavailable
+        val current = transition.session.episode
         endedAdvanceEpisodeKey = current.episodeKey
+        automaticAdvanceAtEnd = ended
         return try {
-            switchEpisode(offset = 1).also { result ->
+            val result = if (transition.downloadId != null) loadOfflineDownload(transition.downloadId)
+            else loadEpisode(transition.session.detail, transition.next)
+            result.also {
                 if (result is EpisodeSwitchResult.Failed) {
                     pause()
                     // Keep the failed transition retryable after the player is paused.
@@ -330,6 +416,7 @@ class VideoPlaybackController(
         } catch (error: CancellationException) {
             if (endedAdvanceEpisodeKey == current.episodeKey) {
                 endedAdvanceEpisodeKey = null
+                automaticAdvanceAtEnd = false
                 notifyState()
             }
             throw error
@@ -361,8 +448,7 @@ class VideoPlaybackController(
             )
             currentCoroutineContext().ensureActive()
             if (released || version != requestVersion) return EpisodeSwitchResult.Unavailable
-            val position = AutoSkipPolicy.initialPositionMs(resumePositionMs, playable.opSecond, skipIntro())
-            return if (prepare(detail, playable, position, offlineDownloadId = null)) EpisodeSwitchResult.Switched(playable)
+            return if (prepareEpisode(detail, playable, resumePositionMs)) EpisodeSwitchResult.Switched(playable)
             else EpisodeSwitchResult.Failed
         } catch (error: CancellationException) {
             throw error
@@ -387,8 +473,7 @@ class VideoPlaybackController(
         if (completed.none { it.id == downloadId }) return offlineFailure()
         val snapshot = (catalog.snapshot(entry.detail.mediaKey) ?: entry.detail).copy(related = emptyList())
         return try {
-            val position = AutoSkipPolicy.initialPositionMs(resumePositionMs, entry.episode.opSecond, skipIntro())
-            if (prepare(snapshot, entry.episode, position, offlineDownloadId = downloadId)) {
+            if (prepareEpisode(snapshot, entry.episode, resumePositionMs, offlineDownloadId = downloadId)) {
                 EpisodeSwitchResult.Switched(entry.episode)
             } else offlineFailure()
         } catch (_: Exception) {
@@ -463,6 +548,7 @@ class VideoPlaybackController(
             repository: CatalogRepository,
             downloads: OfflineDownloadRepository? = null,
         ): VideoPlaybackController {
+            val autoSkipPreferences = AutoSkipPreferenceStore(applicationContext)
             val player = ExoPlayer.Builder(applicationContext)
                 .setSeekBackIncrementMs(10_000L)
                 .setSeekForwardIncrementMs(10_000L)
@@ -475,7 +561,8 @@ class VideoPlaybackController(
                 repository = repository,
                 session = Media3PlaybackSession(session),
                 canPlay = { ScreenOffPlaybackObserver.canPlay(applicationContext) },
-                skipIntro = { AutoSkipPreferenceStore(applicationContext).isEnabled() },
+                skipIntro = autoSkipPreferences::isEnabled,
+                seriesSkipTimes = autoSkipPreferences::getSeriesTimes,
                 monotonicClock = android.os.SystemClock::elapsedRealtime,
             ).also { controller ->
                 controller.screenObserver = ScreenOffPlaybackObserver(applicationContext, controller::pause)

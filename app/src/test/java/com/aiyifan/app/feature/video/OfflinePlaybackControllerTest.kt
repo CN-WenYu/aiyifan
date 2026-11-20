@@ -70,18 +70,20 @@ class OfflinePlaybackControllerTest {
         assertNull(controller.activeSession)
     }
 
-    @Test fun `offline auto advance skips unavailable episodes and reports asynchronous cache errors`() = runBlocking {
+    @Test fun `offline auto advance uses the next completed episode and reports asynchronous cache errors`() = runBlocking {
         val engine = Engine()
-        val controller = controller(engine)
+        // The catalog decides what's next even if these downloads were queued under different orders.
+        val controller = controller(engine, fullDetail = detail, downloads = entries +
+            OfflinePlaybackEntry("two", detail, second, 2))
         controller.openVideo("video", "one")
         controller.loadOfflineDownload("one")
         engine.hasEnded = true
         assertTrue(controller.advanceToNextEpisodeIfEnded() is EpisodeSwitchResult.Switched)
-        assertEquals("three", controller.activeSession!!.offlineDownloadId)
+        assertEquals("two", controller.activeSession!!.offlineDownloadId)
         engine.hasPlaybackError = true
         assertTrue(controller.hasOfflinePlaybackError)
         assertEquals(0, engine.onlineRequests)
-        assertEquals("three", controller.requestedOfflineDownloadId)
+        assertEquals("two", controller.requestedOfflineDownloadId)
     }
 
     @Test fun `offline session keeps full catalog and resolves missing episode online`() = runBlocking {
@@ -102,20 +104,20 @@ class OfflinePlaybackControllerTest {
         assertEquals(online.mediaUrl, engine.onlineUrls.last())
     }
 
-    @Test fun `automatic advance pauses after missing episode fails to load`() = runBlocking {
-        val repository = object : CatalogRepository by FakeCatalogRepository() {
-            override suspend fun resolvePlayback(detail: VideoDetail, episode: Episode, forceRefresh: Boolean): Episode =
-                error("network unavailable")
+    @Test fun `offline playback does not warn or advance when the following episode is missing`() = runBlocking {
+        for (snapshot in listOf(detail, detail.copy(episodes = listOf(first)))) {
+            val engine = Engine().apply { currentPosition = 98_000L }
+            val controller = controller(engine, fullDetail = snapshot)
+            controller.openVideo("video", "one")
+            controller.loadOfflineDownload("one")
+            assertTrue(engine.isPlaying)
+            assertFalse(controller.showNextEpisodeHint)
+            assertEquals(EpisodeSwitchResult.Unavailable, controller.advanceAutomatically(98_000L))
+            engine.hasEnded = true
+            assertEquals(EpisodeSwitchResult.Unavailable, controller.advanceToNextEpisodeIfEnded())
+            assertEquals("first", controller.activeSession!!.episode.episodeKey)
+            assertEquals(0, engine.onlineRequests)
         }
-        val engine = Engine().apply { isPlaying = true; hasEnded = true }
-        val controller = controller(engine, repository, fullDetail = detail)
-
-        controller.openVideo("video", "one")
-        controller.loadOfflineDownload("one")
-        engine.hasEnded = true
-        assertEquals(EpisodeSwitchResult.Failed, controller.advanceToNextEpisodeIfEnded())
-        assertFalse(engine.isPlaying)
-        assertEquals("first", controller.activeSession!!.episode.episodeKey)
     }
 
     @Test fun `removal releases only matching active download without instantiating provider`() {
@@ -138,11 +140,12 @@ class OfflinePlaybackControllerTest {
         engine: Engine,
         repository: CatalogRepository = FakeCatalogRepository(),
         fullDetail: VideoDetail = detail.copy(episodes = entries.map { it.episode }.sortedBy { it.uniqueId }),
+        downloads: List<OfflinePlaybackEntry> = entries,
     ) = VideoPlaybackController(
         engine, repository, object : PlaybackSession { override fun release() = Unit },
         offlineCatalog = object : OfflinePlaybackCatalog {
-            override fun get(id: String) = entries.firstOrNull { it.id == id }
-            override fun completed(mediaKey: String) = entries.filter { it.detail.mediaKey == mediaKey }
+            override fun get(id: String) = downloads.firstOrNull { it.id == id }
+            override fun completed(mediaKey: String) = downloads.filter { it.detail.mediaKey == mediaKey }
             override fun snapshot(mediaKey: String) = fullDetail
         },
     )
@@ -151,8 +154,8 @@ class OfflinePlaybackControllerTest {
         override var isPlaying = false
         override var hasEnded = false
         override var hasPlaybackError = false
-        override val currentPosition = 120L
-        override val duration = 1000L
+        override var currentPosition = 120L
+        override val duration = 100_000L
         var onlineRequests = 0
         var releases = 0
         var rejectOffline = false

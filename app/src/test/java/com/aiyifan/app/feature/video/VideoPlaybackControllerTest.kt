@@ -662,6 +662,113 @@ class VideoPlaybackControllerTest {
         assertEquals(SleepTimerOption.MINUTES_15, controller.sleepTimerState.option)
     }
 
+    @Test
+    fun `custom series timings apply to successive episodes with unmarked streams`() = runBlocking {
+        val engine = FakePlaybackEngine(duration = 2_700_000L)
+        var settings = SeriesSkipTimes(80L, 90L)
+        val episodes = listOf(sampleEpisode(), sampleEpisode("second"), sampleEpisode("third"))
+            .map { it.copy(opSecond = 0, epSecond = 0) }
+        val detail = sampleDetail(episodes)
+        val controller = VideoPlaybackController(
+            engine, FakeCatalogRepository(), FakePlaybackSession(),
+            skipIntro = { true }, seriesSkipTimes = { settings },
+        )
+
+        controller.loadEpisode(detail, episodes[0])
+        assertEquals(80_000L, engine.seekPositionMs)
+        settings = SeriesSkipTimes(80L, 95L)
+        engine.dispatchPosition(2_599_999L)
+        assertFalse(controller.showNextEpisodeHint)
+        engine.dispatchPosition(2_600_000L)
+        assertTrue(controller.showNextEpisodeHint)
+        controller.pause()
+        assertFalse(controller.showNextEpisodeHint)
+        controller.togglePlayPause()
+        controller.seekTo(2_500_000L)
+        assertFalse(controller.showNextEpisodeHint)
+        engine.dispatchPosition(2_610_000L)
+        assertEquals(EpisodeSwitchResult.Switched(episodes[1]), controller.advanceAutomatically(2_610_000L))
+        assertEquals(80_000L, engine.seekPositionMs)
+        assertEquals(EpisodeSwitchResult.Unavailable, controller.advanceAutomatically(2_610_000L))
+        engine.duration = 2_880_000L
+        engine.dispatchPosition(2_775_000L)
+        assertTrue(controller.showNextEpisodeHint)
+        assertEquals(EpisodeSwitchResult.Unavailable, controller.advanceAutomatically(2_775_000L))
+        engine.dispatchPosition(2_785_000L)
+        assertEquals(EpisodeSwitchResult.Switched(episodes[2]), controller.advanceAutomatically(2_785_000L))
+        engine.dispatchPosition(2_875_000L)
+        assertFalse(controller.showNextEpisodeHint)
+    }
+
+    @Test
+    fun `natural completion can retry a failed early outro transition`() = runBlocking {
+        val episodes = listOf(sampleEpisode(), sampleEpisode("second"))
+        var nextEpisodeRequests = 0
+        val repository = object : CatalogRepository by FakeCatalogRepository() {
+            override suspend fun resolvePlayback(detail: VideoDetail, episode: Episode, forceRefresh: Boolean): Episode {
+                if (++nextEpisodeRequests == 1) error("temporary network failure")
+                return episode
+            }
+        }
+        val engine = FakePlaybackEngine(duration = 120_000L)
+        val controller = VideoPlaybackController(
+            engine, repository, FakePlaybackSession(), skipIntro = { true },
+            seriesSkipTimes = { SeriesSkipTimes(outroSeconds = 20L) },
+        )
+        controller.prepare(sampleDetail(episodes), episodes.first())
+        engine.dispatchPosition(100_000L)
+        assertEquals(EpisodeSwitchResult.Failed, controller.advanceAutomatically(100_000L))
+        controller.togglePlayPause()
+        assertEquals(EpisodeSwitchResult.Unavailable, controller.advanceAutomatically(101_000L))
+        engine.dispatchPosition(110_000L)
+        assertTrue(controller.showNextEpisodeHint)
+        engine.hasEnded = true
+        assertEquals(EpisodeSwitchResult.Switched(episodes[1]), controller.advanceToNextEpisodeIfEnded())
+        assertEquals(2, nextEpisodeRequests)
+    }
+
+    @Test
+    fun `resume beats custom intro and normal end still warns when auto skip is disabled`() = runBlocking {
+        val engine = FakePlaybackEngine(duration = 120_000L)
+        var enabled = true
+        val episodes = listOf(sampleEpisode(), sampleEpisode("second"))
+        val controller = VideoPlaybackController(
+            engine, FakeCatalogRepository(), FakePlaybackSession(),
+            skipIntro = { enabled }, seriesSkipTimes = { SeriesSkipTimes(30L, 20L) },
+        )
+        controller.loadEpisode(sampleDetail(episodes), episodes.first(), resumePositionMs = 12_000L)
+        assertEquals(12_000L, engine.seekPositionMs)
+        enabled = false
+        engine.dispatchPosition(100_000L)
+        assertFalse(controller.showNextEpisodeHint)
+        assertEquals(EpisodeSwitchResult.Unavailable, controller.advanceAutomatically(100_000L))
+        engine.dispatchPosition(110_000L)
+        assertTrue(controller.showNextEpisodeHint)
+        controller.setSleepTimer(SleepTimerOption.END_OF_EPISODE)
+        assertFalse(controller.showNextEpisodeHint)
+    }
+
+    @Test
+    fun `custom intro waits for known duration and overlapping settings fall back to server times`() = runBlocking {
+        val engine = FakePlaybackEngine()
+        val episodes = listOf(sampleEpisode().copy(opSecond = 10L, epSecond = 80L), sampleEpisode("second"))
+        val controller = VideoPlaybackController(
+            engine, FakeCatalogRepository(), FakePlaybackSession(),
+            skipIntro = { true }, seriesSkipTimes = { SeriesSkipTimes(85L, 30L) },
+        )
+        controller.loadEpisode(sampleDetail(episodes), episodes.first())
+        assertEquals(0L, engine.seekPositionMs)
+        assertFalse(controller.showNextEpisodeHint)
+        engine.duration = 100_000L
+        engine.dispatchState()
+        assertEquals(10_000L, engine.seekPositionMs)
+        engine.dispatchPosition(70_000L)
+        assertTrue(controller.showNextEpisodeHint)
+        assertEquals(EpisodeSwitchResult.Unavailable, controller.advanceAutomatically(70_000L))
+        engine.dispatchPosition(80_000L)
+        assertEquals(EpisodeSwitchResult.Switched(episodes[1]), controller.advanceAutomatically(80_000L))
+    }
+
     private fun sampleDetail(episodes: List<Episode> = emptyList()) = VideoDetail(
         mediaKey = "video-1",
         title = "Sample video",

@@ -31,6 +31,14 @@
                 <ImageButton android:id="@+id/fullScreenLockButton" android:layout_width="@dimen/dp_48" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="@string/player_lock_screen" android:padding="@dimen/dp_12" android:src="@drawable/ic_lock" app:tint="@android:color/white" />
             </LinearLayout>
 
+
+            <TextView android:id="@+id/nextEpisodeHint"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="top|center_horizontal" android:layout_marginTop="50dp"
+                android:accessibilityLiveRegion="polite" android:background="@drawable/bg_floating_control"
+                android:paddingHorizontal="8dp" android:paddingVertical="4dp"
+                android:text="@string/player_next_episode_hint" android:textColor="@android:color/white"
+                android:textSize="12sp" android:visibility="gone" />
         </FrameLayout>
 
         <ScrollView android:id="@+id/contentScroll" android:layout_width="match_parent" android:layout_height="@dimen/dp_0" android:layout_weight="1">
@@ -54,6 +62,12 @@
                 </LinearLayout>
 
                 <androidx.appcompat.widget.SwitchCompat android:id="@+id/autoSkipIntroOutroSwitch" android:layout_width="match_parent" android:layout_height="@dimen/dp_48" android:layout_marginTop="@dimen/dp_4" android:gravity="center_vertical" android:text="@string/auto_skip_intro_outro" android:textColor="@color/text_primary" android:textSize="@dimen/sp_14" />
+
+                <com.google.android.material.button.MaterialButton android:id="@+id/seriesSkipSettingsButton"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:minHeight="48dp" android:text="@string/series_skip_title"
+                    android:textColor="@color/accent" android:visibility="gone" />
 
                 <TextView android:layout_width="match_parent" android:layout_height="@dimen/dp_40" android:gravity="center_vertical" android:text="@string/hardcoded_text_027" android:textColor="@color/text_primary" android:textSize="@dimen/sp_16" android:textStyle="bold" />
 
@@ -85,6 +99,14 @@
         </LinearLayout>
 
         <ImageButton android:id="@+id/inAppMiniResizeHandle" android:layout_width="@dimen/dp_32" android:layout_height="@dimen/dp_24" android:layout_gravity="bottom|end" android:background="@android:color/transparent" android:contentDescription="@string/hardcoded_text_032" android:padding="@dimen/dp_2" android:src="@drawable/ic_resize" />
+
+        <TextView android:id="@+id/miniNextEpisodeHint"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal" android:layout_marginTop="8dp"
+            android:accessibilityLiveRegion="polite" android:background="@drawable/bg_floating_control"
+            android:paddingHorizontal="8dp" android:paddingVertical="4dp"
+            android:text="@string/player_next_episode_hint" android:textColor="@android:color/white"
+            android:textSize="12sp" android:visibility="gone" />
     </com.aiyifan.app.feature.video.ResizablePlayerLayout>
 
     <TextView android:id="@+id/playerGestureFeedback" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center" android:background="@drawable/bg_floating_control" android:paddingHorizontal="@dimen/dp_16" android:paddingVertical="@dimen/dp_12" android:textColor="@android:color/white" android:textSize="@dimen/sp_16" android:visibility="gone" />

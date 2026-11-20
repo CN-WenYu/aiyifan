@@ -20,5 +20,13 @@
 
     <ImageButton android:id="@+id/floatingResizeHandle" android:layout_width="@dimen/dp_32" android:layout_height="@dimen/dp_24" android:layout_gravity="bottom|end" android:background="@android:color/transparent" android:contentDescription="@string/hardcoded_text_032" android:padding="@dimen/dp_2" android:src="@drawable/ic_resize" />
 
+    <TextView android:id="@+id/floatingNextEpisodeHint"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal" android:layout_marginBottom="4dp"
+        android:accessibilityLiveRegion="polite" android:background="@drawable/bg_floating_control"
+        android:paddingHorizontal="8dp" android:paddingVertical="4dp"
+        android:text="@string/player_next_episode_hint" android:textColor="@android:color/white"
+        android:textSize="12sp" android:visibility="gone" />
+
     <ImageButton android:id="@+id/floatingRestoreHandle" android:layout_width="@dimen/dp_24" android:layout_height="match_parent" android:layout_gravity="start|center_vertical" android:background="@android:color/black" android:contentDescription="@string/floating_player_restore" android:src="@drawable/ic_back" app:tint="@android:color/white" android:visibility="gone" />
 </com.aiyifan.app.feature.video.ResizablePlayerLayout>

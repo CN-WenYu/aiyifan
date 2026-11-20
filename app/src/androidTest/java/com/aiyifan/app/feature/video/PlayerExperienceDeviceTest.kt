@@ -525,6 +525,78 @@ class PlayerExperienceDeviceTest {
         error("Missing visible text: $text")
     }
 
+    @Test
+    fun seriesSkipSettingsPersistAndWarningFollowsThePlayer() = withPlayback(episodeCount = 3) { scenario, controller ->
+        val preferences = AutoSkipPreferenceStore(context)
+        val mediaKey = mainValue { controller.activeSession!!.detail.mediaKey }
+        val previousTimes = preferences.getSeriesTimes(mediaKey)
+        val otherTimes = preferences.getSeriesTimes("qa-unrelated-series")
+        val wasEnabled = preferences.isEnabled()
+        val originalFlags = automation.serviceInfo.flags
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            preferences.setEnabled(true)
+            scenario.onActivity { activity ->
+                assertTrue(activity.findViewById<View>(R.id.seriesSkipSettingsButton).performClick())
+            }
+            waitForText("设置本剧跳过时间")
+            screenshot("series-skip-sheet.png")
+            scenario.onActivity { activity ->
+                val sheet = VideoPlayerActivity::class.java.getDeclaredField("seriesSkipSheet")
+                    .apply { isAccessible = true }.get(activity) as android.app.Dialog
+                sheet.findViewById<android.widget.EditText>(R.id.introMinutes).setText("")
+                sheet.findViewById<android.widget.EditText>(R.id.introSeconds).setText("2")
+                sheet.findViewById<android.widget.EditText>(R.id.outroMinutes).setText("0")
+                val seconds = sheet.findViewById<android.widget.EditText>(R.id.outroSeconds)
+                seconds.setText("60")
+                sheet.findViewById<View>(R.id.saveButton).performClick()
+                assertNotNull(seconds.error)
+                assertTrue(sheet.isShowing)
+                seconds.setText("3")
+                sheet.findViewById<View>(R.id.saveButton).performClick()
+                assertFalse(sheet.isShowing)
+            }
+            assertEquals(SeriesSkipTimes(2L, 3L), AutoSkipPreferenceStore(context).getSeriesTimes(mediaKey))
+            assertEquals(otherTimes, preferences.getSeriesTimes("qa-unrelated-series"))
+            scenario.onActivity {
+                kotlinx.coroutines.runBlocking { controller.switchEpisode(1) }
+            }
+            await { controller.canSeek && controller.currentPositionMs == 2_000L }
+
+            scenario.onActivity {
+                controller.seekTo(8_000L)
+                controller.togglePlayPause()
+            }
+            waitForText("即将播放下一集")
+            screenshot("series-skip-portrait.png")
+            scenario.onActivity { it.findViewById<View>(R.id.fullScreenButton).performClick() }
+            waitForText("即将播放下一集")
+            screenshot("series-skip-fullscreen.png")
+            scenario.onActivity {
+                it.findViewById<View>(R.id.fullScreenBackButton).performClick()
+                VideoPlayerActivity::class.java.getDeclaredMethod("showInAppMiniPlayer")
+                    .apply { isAccessible = true }.invoke(it)
+                assertTrue(it.findViewById<View>(R.id.miniNextEpisodeHint).isShown)
+            }
+            screenshot("series-skip-mini.png")
+            scenario.onActivity {
+                controller.pause()
+                assertFalse(it.findViewById<View>(R.id.miniNextEpisodeHint).isShown)
+                controller.seekTo(16_600L)
+                controller.togglePlayPause()
+            }
+            await { controller.activeSession?.episode?.episodeKey == "qa-episode-3" }
+            assertFalse(mainValue { controller.showNextEpisodeHint })
+        } finally {
+            preferences.setSeriesTimes(mediaKey, previousTimes)
+            preferences.setEnabled(wasEnabled)
+            automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
+        }
+    }
+
     private fun withPlayback(
         episodeCount: Int = 2,
         startIndex: Int = 0,

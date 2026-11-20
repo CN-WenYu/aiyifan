@@ -88,6 +88,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
     private var playerBrightness = -1f
     private var sleepTimerDialog: com.google.android.material.bottomsheet.BottomSheetDialog? = null
+    private var seriesSkipSheet: com.google.android.material.bottomsheet.BottomSheetDialog? = null
     private var restorePipLayout: (() -> Unit)? = null
     private val fullscreenLockState = FullscreenLockState()
     private val unlockPromptHideRunnable = Runnable {
@@ -160,6 +161,14 @@ class VideoPlayerActivity : AppCompatActivity() {
             isChecked = autoSkipPreferenceStore.isEnabled()
             setOnCheckedChangeListener { _, isChecked ->
                 autoSkipPreferenceStore.setEnabled(isChecked)
+                renderNextEpisodeHint()
+            }
+        }
+        binding.seriesSkipSettingsButton.setOnClickListener {
+            val series = detail?.takeIf { it.episodes.size > 1 } ?: return@setOnClickListener
+            seriesSkipSheet?.dismiss()
+            seriesSkipSheet = SeriesAutoSkipSheet.show(this, autoSkipPreferenceStore.getSeriesTimes(series.mediaKey)) {
+                autoSkipPreferenceStore.setSeriesTimes(series.mediaKey, it)
             }
         }
         binding.inAppMiniPlayPauseButton.setOnClickListener {
@@ -214,6 +223,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             syncFromActivePlaybackSession()
             updateEpisodeButtons()
             updateInAppMiniPlayPauseButton()
+            renderNextEpisodeHint()
             if (playbackController.isPlaybackEnded) {
                 resetFullscreenLock()
                 lifecycleScope.launch {
@@ -355,6 +365,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     private fun renderDetail(detail: VideoDetail) {
         binding.title.text = detail.title
+        binding.seriesSkipSettingsButton.isVisible = detail.episodes.size > 1
         binding.videoTitle.text = detail.title
         binding.fullScreenVideoTitle.text = detail.title
         renderEpisodeSelection()
@@ -467,14 +478,16 @@ class VideoPlayerActivity : AppCompatActivity() {
     }
 
     private fun handlePlaybackPosition(positionMs: Long) {
+        renderNextEpisodeHint()
         lifecycleScope.launch {
-            val wasEnded = playbackController.isPlaybackEnded
-            val result = playbackController.advanceAutomatically(positionMs)
-            if (!wasEnded && result is EpisodeSwitchResult.Switched) {
-                Toast.makeText(this@VideoPlayerActivity, R.string.auto_skip_outro, Toast.LENGTH_SHORT).show()
-            }
-            handleEpisodeResult(result)
+            handleEpisodeResult(playbackController.advanceAutomatically(positionMs))
         }
+    }
+
+    private fun renderNextEpisodeHint() {
+        val show = playbackController.showNextEpisodeHint
+        binding.nextEpisodeHint.isVisible = show
+        binding.miniNextEpisodeHint.isVisible = show
     }
 
     private fun attachPlayerToCurrentSurface() {
@@ -854,6 +867,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         }
         playbackJob?.cancel()
         detailJob?.cancel()
+        seriesSkipSheet?.dismiss()
         resetFullscreenLock()
         unregisterPositionListener()
         removeStateListener?.invoke()

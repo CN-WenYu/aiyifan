@@ -8,6 +8,18 @@ import org.junit.Test
 class AutoSkipPolicyTest {
 
     @Test
+    fun `out of range and cleared settings independently fall back to server times`() {
+        assertEquals(
+            AutoSkipPolicy.EpisodeTimes(introMs = 15_000L, outroStartMs = 80_000L),
+            AutoSkipPolicy.episodeTimes(100_000L, 10L, 80L, SeriesSkipTimes(15L, 100L)),
+        )
+        assertEquals(
+            AutoSkipPolicy.EpisodeTimes(introMs = 10_000L, outroStartMs = 75_000L),
+            AutoSkipPolicy.episodeTimes(100_000L, 10L, 80L, SeriesSkipTimes(outroSeconds = 25L)),
+        )
+    }
+
+    @Test
     fun `initial position preserves an existing resume position`() {
         assertEquals(12_345L, AutoSkipPolicy.initialPositionMs(12_345L, 90L, enabled = true))
     }

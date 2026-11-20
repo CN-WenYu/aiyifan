@@ -97,6 +97,7 @@ class FloatingPlayerService : Service() {
             controller.attach(root.findViewById<PlayerView>(R.id.floatingPlayerView))
             controller.hasOverlayOwner = true
             removePositionListener = controller.addPositionListener { positionMs ->
+                renderNextEpisodeHint(root)
                 serviceScope.launch { controller.advanceAutomatically(positionMs) }
             }
             removeStateListener = controller.addStateListener {
@@ -108,6 +109,7 @@ class FloatingPlayerService : Service() {
                     offlineErrorShown = true
                     Toast.makeText(this, R.string.offline_playback_unavailable, Toast.LENGTH_LONG).show()
                 } else if (!controller.hasOfflinePlaybackError) offlineErrorShown = false
+                renderNextEpisodeHint(root)
                 root.findViewById<android.widget.TextView>(R.id.floatingSleepTimerButton).text =
                     SleepTimerDialog.label(this, controller.sleepTimerState)
                 updatePlaybackButtons(root)
@@ -135,6 +137,11 @@ class FloatingPlayerService : Service() {
             closeFloatingPlayer(stopService = true, releasePlayback = false)
             return false
         }
+    }
+
+    private fun renderNextEpisodeHint(root: View) {
+        root.findViewById<View>(R.id.floatingNextEpisodeHint).visibility =
+            if (hiddenEdge == null && controller.showNextEpisodeHint) View.VISIBLE else View.GONE
     }
 
     private fun bindControls(root: View) {
@@ -441,6 +448,7 @@ class FloatingPlayerService : Service() {
                 params.x = if (edge == FloatingWindowEdge.LEFT) 0 else displayMetrics.widthPixels - params.width
                 root.findViewById<PlayerView>(R.id.floatingPlayerView).visibility = View.INVISIBLE
                 showRestoreHandle(root, edge)
+                renderNextEpisodeHint(root)
             } ?: hideRestoreHandle(root)
         }
         updateLayout(params)
@@ -461,6 +469,7 @@ class FloatingPlayerService : Service() {
         hiddenEdge = null
         root.findViewById<PlayerView>(R.id.floatingPlayerView).visibility = View.VISIBLE
         hideRestoreHandle(root)
+        renderNextEpisodeHint(root)
         updateLayout(params)
         if (showControls) showControls(root)
     }
