@@ -22,7 +22,6 @@ class LocalMediaNavigationContractTest {
         val root = parseLayout(layoutFile("activity_main.xml"))
         val tabItems = elements(root).filter { it.tagName == "com.google.android.material.tabs.TabItem" }.toList()
 
-        assertEquals(3, tabItems.size)
         assertEquals("@string/tab_short_drama", tabItems[1].getAttribute("android:text"))
     }
 

@@ -10,14 +10,13 @@
         android:id="@+id/fragmentContainer"
         android:layout_width="match_parent"
         android:layout_height="@dimen/dp_0"
-        android:background="@color/surface"
         android:layout_weight="1" />
 
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/bottomTabs"
         android:layout_width="match_parent"
         android:layout_height="@dimen/dp_56"
-        android:background="@color/surface"
+        android:background="@color/page_bg"
         app:tabGravity="fill"
         app:tabIndicatorHeight="0dp"
         app:tabMode="fixed"

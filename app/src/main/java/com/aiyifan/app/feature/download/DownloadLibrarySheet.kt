@@ -3,7 +3,6 @@ package com.aiyifan.app.feature.download
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.WindowCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -14,7 +13,7 @@ import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.ui.showDestructiveConfirmation
 import com.aiyifan.app.core.ui.applySystemBarsPadding
-import com.aiyifan.app.core.ui.usesLightSystemBarIcons
+import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.ItemDownloadEpisodeBinding
 import com.aiyifan.app.databinding.SheetDownloadSelectionBinding
 import com.google.android.material.bottomsheet.BottomSheetBehavior
@@ -88,10 +87,7 @@ internal class DownloadLibrarySheet(
         activity.lifecycle.addObserver(lifecycleObserver)
         update(film)
         dialog.show()
-        dialog.window?.let { window ->
-            WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars =
-                usesLightSystemBarIcons(activity.resources.configuration.uiMode)
-        }
+        dialog.window?.setupPageSystemBars()
     }
 
     fun update(film: DownloadFilm?) {

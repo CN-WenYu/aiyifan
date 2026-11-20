@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.isVisible
 import com.aiyifan.app.core.ui.applySystemBarsPadding
+import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.SheetDownloadSelectionBinding
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
@@ -30,6 +31,7 @@ internal fun AppCompatActivity.confirmDownloadNetwork(ids: Set<String>, eligible
     dialog.behavior.setShouldRemoveExpandedCorners(false)
     bindDownloadConsent(binding, dialog, ids, eligible, start)
     dialog.show()
+    dialog.window?.setupPageSystemBars()
 }
 
 internal fun AppCompatActivity.bindDownloadConsent(

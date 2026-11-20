@@ -25,7 +25,7 @@ import com.aiyifan.app.core.download.DownloadTask
 import com.aiyifan.app.core.download.OfflineDownloadRepository
 import com.aiyifan.app.core.ui.showDestructiveConfirmation
 import com.aiyifan.app.core.ui.applySystemBarsPadding
-import com.aiyifan.app.core.ui.setupPageSystemBars
+import com.aiyifan.app.core.ui.setupEdgeToEdge
 import com.aiyifan.app.databinding.ActivityDownloadsBinding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -66,7 +66,7 @@ class DownloadsActivity : AppCompatActivity() {
             return
         }
         super.onCreate(savedInstanceState)
-        setupPageSystemBars()
+        setupEdgeToEdge()
         binding = ActivityDownloadsBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.root.applySystemBarsPadding(left = true, right = true, bottom = true)

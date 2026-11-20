@@ -3,7 +3,7 @@
     android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:background="@drawable/bg_page">
     <FrameLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="56dp"
-        android:background="@color/surface">
+        android:background="@color/page_bg">
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center"
             android:text="@string/download_queue_title" android:textSize="18sp" android:textStyle="bold" android:textColor="@color/text_primary" />
         <ImageButton android:id="@+id/backButton" android:layout_width="56dp" android:layout_height="match_parent"

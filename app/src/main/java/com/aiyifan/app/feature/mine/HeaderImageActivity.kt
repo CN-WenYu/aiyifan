@@ -26,6 +26,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import com.aiyifan.app.R
 import com.aiyifan.app.core.ui.applySystemBarsPadding
+import com.aiyifan.app.core.ui.setupEdgeToEdge
 import com.bumptech.glide.Glide
 import com.bumptech.glide.RequestManager
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -58,7 +59,7 @@ class HeaderImageActivity : AppCompatActivity() {
             return
         }
         imageName = name
-        WindowCompat.setDecorFitsSystemWindows(window, false)
+        setupEdgeToEdge()
         WindowCompat.getInsetsController(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE

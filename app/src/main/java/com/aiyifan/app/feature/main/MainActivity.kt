@@ -12,7 +12,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -23,7 +22,6 @@ import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.R
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.setupEdgeToEdge
-import com.aiyifan.app.core.ui.usesLightSystemBarIcons
 import com.aiyifan.app.databinding.ActivityMainBinding
 import com.aiyifan.app.feature.download.DownloadLibraryFragment
 import com.aiyifan.app.feature.home.HomeFragment
@@ -61,7 +59,7 @@ class MainActivity : AppCompatActivity() {
         setupEdgeToEdge()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        // Mine draws its header behind the status bar and owns its top inset.
+        // Mine's header handles its own top inset.
         ViewCompat.setOnApplyWindowInsetsListener(binding.fragmentContainer) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             view.updatePadding(
@@ -87,15 +85,14 @@ class MainActivity : AppCompatActivity() {
         }
         binding.bottomTabs.getTabAt(selectedTabPosition)?.select()
         updateTabTextSizes(selectedTabPosition)
-        updateTopBackground(selectedTabPosition)
         if (savedInstanceState == null) {
             show(fragmentFor(selectedTabPosition))
         }
         binding.bottomTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {
                 updateTabTextSizes(tab.position)
-                updateTopBackground(tab.position)
                 show(fragmentFor(tab.position))
+                ViewCompat.requestApplyInsets(binding.fragmentContainer)
             }
 
             override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) = Unit
@@ -113,15 +110,6 @@ class MainActivity : AppCompatActivity() {
             )
             textView?.setTextColor(getColor(if (index == selectedPosition) R.color.accent else R.color.text_secondary))
         }
-    }
-
-    private fun updateTopBackground(selectedPosition: Int) {
-        val color = getColor(if (selectedPosition == 1) R.color.page_bg else R.color.surface)
-        binding.fragmentContainer.setBackgroundColor(color)
-        window.statusBarColor = if (selectedPosition == TAB_MINE) android.graphics.Color.TRANSPARENT else color
-        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars =
-            selectedPosition != TAB_MINE && usesLightSystemBarIcons(resources.configuration.uiMode)
-        ViewCompat.requestApplyInsets(binding.fragmentContainer)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

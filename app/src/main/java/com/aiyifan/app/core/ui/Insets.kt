@@ -1,9 +1,10 @@
 package com.aiyifan.app.core.ui
 
 import android.app.Activity
+import android.graphics.Color
 import android.os.Build
 import android.view.View
-import androidx.annotation.ColorRes
+import android.view.Window
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -11,27 +12,44 @@ import androidx.core.view.updateLayoutParams
 import androidx.core.view.updatePadding
 import com.aiyifan.app.R
 
-/** For screens with a surface header and a page background behind the navigation bar. */
-fun Activity.setupPageSystemBars() {
-    // Before Android 8 navigation icons are always white.
-    val needsDarkBackdrop = Build.VERSION.SDK_INT < Build.VERSION_CODES.O &&
-        usesLightSystemBarIcons(resources.configuration.uiMode)
-    setupEdgeToEdge(navigationBarBackground = if (needsDarkBackdrop) android.R.color.black else R.color.page_bg)
-}
+fun Activity.setupEdgeToEdge() = window.setupPageSystemBars()
 
-fun Activity.setupEdgeToEdge(@ColorRes navigationBarBackground: Int = R.color.surface) {
-    val lightSystemBars = usesLightSystemBarIcons(resources.configuration.uiMode)
-    WindowCompat.setDecorFitsSystemWindows(window, false)
-    window.statusBarColor = getColor(R.color.surface)
-    window.navigationBarColor = getColor(navigationBarBackground)
+@Suppress("DEPRECATION")
+fun Window.setupPageSystemBars() {
+    val decor = decorView
+    val pageColor = decor.context.getColor(R.color.page_bg)
+    val useDarkIcons = usesLightSystemBarIcons(decor.resources.configuration.uiMode)
+    // Before Android 8 navigation icons are always white.
+    val navigationColor = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O && useDarkIcons) {
+        Color.BLACK
+    } else {
+        pageColor
+    }
+    WindowCompat.setDecorFitsSystemWindows(this, false)
+    statusBarColor = Color.TRANSPARENT
+    navigationBarColor = Color.TRANSPARENT
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        window.isStatusBarContrastEnforced = false
-        window.isNavigationBarContrastEnforced = false
+        isStatusBarContrastEnforced = false
+        isNavigationBarContrastEnforced = false
     }
-    WindowCompat.getInsetsController(window, window.decorView).apply {
-        isAppearanceLightStatusBars = lightSystemBars
-        isAppearanceLightNavigationBars = lightSystemBars
+    WindowCompat.getInsetsController(this, decor).apply {
+        isAppearanceLightStatusBars = useDarkIcons
+        isAppearanceLightNavigationBars = useDarkIcons
     }
+
+    // Android 15+ draws transparent system bars over the app. Paint the inset areas
+    // independently of the page so headers, sheet surfaces and video can keep their colors.
+    val backdrop = SystemBarBackdrop(pageColor, navigationColor)
+    backdrop.setBounds(0, 0, decor.width, decor.height)
+    decor.overlay.add(backdrop)
+    decor.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+        backdrop.setBounds(0, 0, view.width, view.height)
+    }
+    ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
+        backdrop.update(insets)
+        ViewCompat.onApplyWindowInsets(view, insets)
+    }
+    ViewCompat.requestApplyInsets(decor)
 }
 
 fun View.applySystemBarsPadding(

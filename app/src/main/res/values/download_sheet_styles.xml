@@ -1,7 +1,7 @@
 <resources>
     <style name="ThemeOverlay.Aiyifan.DownloadSheet" parent="ThemeOverlay.MaterialComponents.BottomSheetDialog">
         <item name="bottomSheetStyle">@style/Widget.Aiyifan.DownloadSheet</item>
-        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="enableEdgeToEdge">true</item>
     </style>
     <style name="Widget.Aiyifan.DownloadSheet" parent="Widget.MaterialComponents.BottomSheet.Modal">

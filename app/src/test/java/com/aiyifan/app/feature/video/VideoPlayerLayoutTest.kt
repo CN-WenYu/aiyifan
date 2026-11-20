@@ -36,7 +36,7 @@ class VideoPlayerLayoutTest {
         val topBar = viewWithId(document, "playerTopBar")!!
         val playerContainer = viewWithId(document, "playerContainer")!!
 
-        assertEquals("@color/surface", topBar.getAttribute("android:background"))
+        assertEquals("@color/page_bg", topBar.getAttribute("android:background"))
         assertEquals("@drawable/ic_back", viewWithId(topBar, "backButton")!!.getAttribute("android:src"))
         assertEquals("fullScreenTitleBar", viewWithId(playerContainer, "fullScreenTitleBar")!!.idName())
     }

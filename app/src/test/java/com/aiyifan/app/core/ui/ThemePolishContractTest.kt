@@ -47,8 +47,11 @@ class ThemePolishContractTest {
     }
 
     @Test
-    fun `main status inset is backed by the semantic surface`() {
-        assertEquals("@color/surface", view(root(layout("activity_main")), "fragmentContainer").getAttribute("android:background"))
+    fun `download task toolbar uses the same background as the home tabs`() {
+        val homeBackground = view(root(layout("activity_main")), "bottomTabs").getAttribute("android:background")
+        val downloads = root(layout("activity_downloads"))
+        assertEquals("@color/page_bg", homeBackground)
+        assertEquals(homeBackground, view(downloads, "topBar").getAttribute("android:background"))
     }
 
     private fun colorNames(directory: String): Set<String> = root(resource("$directory/colors.xml"))

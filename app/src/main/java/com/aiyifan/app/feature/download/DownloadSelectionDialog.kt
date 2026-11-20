@@ -11,7 +11,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
-import androidx.core.view.WindowCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
@@ -20,7 +19,7 @@ import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.ui.applySystemBarsPadding
-import com.aiyifan.app.core.ui.usesLightSystemBarIcons
+import com.aiyifan.app.core.ui.setupPageSystemBars
 import com.aiyifan.app.databinding.SheetDownloadSelectionBinding
 import com.aiyifan.app.databinding.ItemDownloadEpisodeBinding
 import androidx.recyclerview.widget.GridLayoutManager
@@ -117,10 +116,7 @@ object DownloadSelectionDialog {
             activity.lifecycle.addObserver(observer)
             renderSelection()
             dialog.show()
-            dialog.window?.let { window ->
-                WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars =
-                    usesLightSystemBarIcons(activity.resources.configuration.uiMode)
-            }
+            dialog.window?.setupPageSystemBars()
             observation = activity.lifecycleScope.launch {
                 try {
                     repository.awaitLoaded()

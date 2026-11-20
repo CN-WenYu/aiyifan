@@ -57,7 +57,6 @@ class HistoryActivity : AppCompatActivity() {
         binding.recycler.adapter = adapter
         selectionBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(getColor(R.color.surface))
         }
         fun addAction(label: Int, action: () -> Unit) {
             selectionBar.addView(TextView(this).apply {

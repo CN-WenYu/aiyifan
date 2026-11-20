@@ -7,11 +7,11 @@
     android:orientation="vertical">
 
     <LinearLayout android:id="@+id/localHeader" android:layout_width="match_parent" android:layout_height="@dimen/dp_56"
-        android:orientation="horizontal" android:gravity="center_vertical" android:background="@color/surface">
+        android:orientation="horizontal" android:gravity="center_vertical" android:background="@color/page_bg">
     <TextView
         android:layout_width="match_parent"
         android:layout_height="@dimen/dp_56"
-        android:background="@color/surface"
+        android:background="@color/page_bg"
         android:gravity="center_vertical"
         android:paddingStart="@dimen/dp_16"
         android:text="@string/local_media_title"
@@ -42,7 +42,7 @@
         android:layout_width="match_parent"
         android:layout_height="@dimen/dp_48"
         android:layout_marginTop="@dimen/dp_8"
-        android:background="@color/surface"
+        android:background="@color/page_bg"
         app:tabIndicatorColor="@color/accent"
         app:tabIndicatorHeight="@dimen/dp_2"
         app:tabMode="fixed"

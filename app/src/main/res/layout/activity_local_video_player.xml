@@ -39,7 +39,7 @@
         android:id="@+id/localPlayerTopBar"
         android:layout_width="match_parent"
         android:layout_height="@dimen/dp_56"
-        android:background="@color/surface"
+        android:background="@color/page_bg"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
