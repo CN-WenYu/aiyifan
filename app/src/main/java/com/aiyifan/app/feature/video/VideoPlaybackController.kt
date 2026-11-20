@@ -13,6 +13,8 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.PlayerView
 import com.aiyifan.app.core.data.CatalogRepository
+import com.aiyifan.app.core.data.anime.AnimeSourceUnavailable
+import com.aiyifan.app.core.data.anime.isAnimeKey
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import com.aiyifan.app.core.ui.PlaybackScreenAwakeController
@@ -71,6 +73,12 @@ sealed interface EpisodeSwitchResult {
 
     data object Failed : EpisodeSwitchResult
 }
+
+internal data class AnimePlaybackFailure(
+    val episode: Episode,
+    val resumePositionMs: Long,
+    val noSource: Boolean,
+)
 
 class VideoPlaybackController(
     private val engine: PlaybackEngine,
@@ -140,6 +148,8 @@ class VideoPlaybackController(
         private set
     var pendingEpisode: Episode? = null
         private set
+    internal var animePlaybackFailure: AnimePlaybackFailure? = null
+        private set
     var hasOverlayOwner: Boolean = false
     var requestedMediaKey: String? = null
         private set
@@ -194,6 +204,7 @@ class VideoPlaybackController(
         requestedOfflineDownloadId = offlineDownloadId
         offlineSession = offlineDownloadId != null
         offlineLoadFailed = false
+        animePlaybackFailure = null
         if (activeDetail?.mediaKey != mediaKey || sourceChanged) {
             replacingMedia = true
             engine.pause()
@@ -438,6 +449,7 @@ class VideoPlaybackController(
         val version = ++requestVersion
         isLoading = true
         pendingEpisode = episode
+        animePlaybackFailure = null
         notifyState()
         try {
             // A stream variant must not replace the identity used by the catalog and history.
@@ -452,7 +464,10 @@ class VideoPlaybackController(
             else EpisodeSwitchResult.Failed
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            if (version == requestVersion && detail.mediaKey.isAnimeKey()) {
+                animePlaybackFailure = AnimePlaybackFailure(episode, resumePositionMs, error is AnimeSourceUnavailable)
+            }
             return EpisodeSwitchResult.Failed
         } finally {
             if (version == requestVersion) {

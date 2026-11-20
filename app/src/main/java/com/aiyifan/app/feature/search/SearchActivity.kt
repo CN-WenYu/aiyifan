@@ -5,6 +5,7 @@ import com.aiyifan.app.core.startup.StartupSession
 import com.aiyifan.app.feature.startup.StartupActivity
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -16,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.aiyifan.app.BuildConfig
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.VideoSummary
@@ -37,7 +39,10 @@ class SearchActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySearchBinding
     private lateinit var resultAdapter: SearchResultAdapter
     private lateinit var suggestionAdapter: SearchSuggestionAdapter
-    private val historyPrefs by lazy { getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    private val anime by lazy { BuildConfig.ANIME_ENABLED && intent.getBooleanExtra(EXTRA_ANIME, false) }
+    private val historyPrefs by lazy {
+        getSharedPreferences(if (anime) ANIME_PREFS_NAME else PREFS_NAME, Context.MODE_PRIVATE)
+    }
     private var suggestionJob: Job? = null
     private var searchJob: Job? = null
     private var searchRequestVersion = 0L
@@ -57,13 +62,14 @@ class SearchActivity : AppCompatActivity() {
         binding.root.applySystemBarsPadding(left = true, right = true, bottom = true)
         binding.topBar.applySystemBarsPadding(top = true, growHeight = true)
 
+        if (anime) binding.searchEdit.setHint(R.string.anime_search_hint)
         setupLists()
         setupInteractions()
         renderInitialState()
     }
 
     private fun setupLists() {
-        resultAdapter = SearchResultAdapter { video ->
+        resultAdapter = SearchResultAdapter(anime = anime) { video ->
             startActivity(VideoPlayerActivity.intent(this, video.mediaKey))
         }
         binding.resultRecycler.layoutManager = LinearLayoutManager(this)
@@ -118,7 +124,8 @@ class SearchActivity : AppCompatActivity() {
         }
         binding.initialScroll.isVisible = false
         binding.resultsContainer.isVisible = false
-        binding.suggestionRecycler.isVisible = true
+        binding.suggestionRecycler.isVisible = !anime
+        if (anime) return
         suggestionAdapter.submitList(emptyList())
         suggestionJob = lifecycleScope.launch {
             delay(SUGGESTION_DELAY_MS)
@@ -140,7 +147,7 @@ class SearchActivity : AppCompatActivity() {
     private fun executeSearch() {
         val keyword = binding.searchEdit.text.toString().trim()
         if (keyword.isEmpty()) {
-            binding.searchEdit.error = "请输入搜索内容"
+            binding.searchEdit.error = if (anime) getString(R.string.anime_search_hint) else "请输入搜索内容"
             binding.searchEdit.requestFocus()
             return
         }
@@ -152,7 +159,9 @@ class SearchActivity : AppCompatActivity() {
         binding.suggestionRecycler.isVisible = false
         renderSearchState(SearchPageState.Loading)
         searchJob = lifecycleScope.launch {
-            runCatching { AppGraph.catalogRepository.searchVideos(keyword) }
+            runCatching {
+                if (anime) AppGraph.animeCatalog.search(keyword) else AppGraph.catalogRepository.searchVideos(keyword)
+            }
                 .onSuccess { results ->
                     if (requestVersion != searchRequestVersion) return@onSuccess
                     saveKeyword(keyword)
@@ -177,7 +186,7 @@ class SearchActivity : AppCompatActivity() {
         binding.searchStatus.text = when (state) {
             SearchPageState.Loading -> "正在搜索..."
             SearchPageState.Success -> ""
-            SearchPageState.Empty -> "没有找到相关视频"
+            SearchPageState.Empty -> if (anime) getString(R.string.anime_search_empty) else "没有找到相关视频"
             SearchPageState.Failure -> "搜索失败，点击重试"
         }
     }
@@ -270,12 +279,17 @@ class SearchActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private companion object {
-        const val PREFS_NAME = "search_history"
-        const val HISTORY_KEY = "history_ordered"
-        const val LEGACY_HISTORY_KEY = "keywords"
-        const val HISTORY_LIMIT = 20
-        const val HISTORY_PREVIEW_SIZE = 10
-        const val SUGGESTION_DELAY_MS = 300L
+    companion object {
+        internal fun animeIntent(context: Context): Intent =
+            Intent(context, SearchActivity::class.java).putExtra(EXTRA_ANIME, true)
+
+        private const val EXTRA_ANIME = "anime"
+        private const val ANIME_PREFS_NAME = "anime_search_history"
+        private const val PREFS_NAME = "search_history"
+        private const val HISTORY_KEY = "history_ordered"
+        private const val LEGACY_HISTORY_KEY = "keywords"
+        private const val HISTORY_LIMIT = 20
+        private const val HISTORY_PREVIEW_SIZE = 10
+        private const val SUGGESTION_DELAY_MS = 300L
     }
 }

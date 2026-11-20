@@ -63,6 +63,11 @@ android {
         versionName = VERSION_NAME
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField(
+            "boolean",
+            "ANIME_ENABLED",
+            providers.gradleProperty("enableAnime").map(String::toBooleanStrict).orElse(true).get().toString(),
+        )
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
         }
