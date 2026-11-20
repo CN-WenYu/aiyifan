@@ -28,6 +28,12 @@ import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.setupEdgeToEdge
 import com.aiyifan.app.databinding.ActivityDownloadsBinding
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
@@ -101,20 +107,30 @@ class DownloadsActivity : AppCompatActivity() {
                 } catch (error: CancellationException) { throw error }
                 catch (_: Exception) { showOperationFailure() }
                 loaded = true
-                launch {
+                val storageTicker = flow {
                     while (true) {
-                        val (used, remaining) = repository.storageBytes()
-                        binding.storage.text = getString(R.string.download_storage,
-                            Formatter.formatShortFileSize(this@DownloadsActivity, used),
-                            Formatter.formatShortFileSize(this@DownloadsActivity, remaining))
-                        kotlinx.coroutines.delay(1_000)
+                        delay(1_000)
+                        emit(Unit)
                     }
                 }
-                repository.tasks.collect { render() }
+                // Completion and removal refresh storage immediately. The ticker also picks up disk changes
+                // that don't emit a task update, such as space freed by other apps.
+                val taskChanges = repository.tasks.onEach { render() }.map { Unit }
+                merge(taskChanges, storageTicker).conflate().collect { renderStorage() }
             }
         }
         repository.refresh()
         render()
+    }
+
+    private suspend fun renderStorage() {
+        val (used, remaining) = repository.storageBytes()
+        val text = getString(
+            R.string.download_storage,
+            Formatter.formatShortFileSize(this, used),
+            Formatter.formatShortFileSize(this, remaining),
+        )
+        if (binding.storage.text != text) binding.storage.text = text
     }
 
     private fun render() {

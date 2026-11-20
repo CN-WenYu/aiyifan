@@ -10,13 +10,16 @@ import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadProgress
 import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.WritableDownloadIndex
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.platform.view.inspector.WindowInspectorCompat
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.download.DownloadMetadata
+import com.aiyifan.app.core.download.DownloadRuntime
 import com.aiyifan.app.core.download.downloadId
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
@@ -29,6 +32,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import android.os.SystemClock
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -37,6 +42,140 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class DownloadLibraryNavigationTest {
+    @Test fun longPressAndBatchDeletionKeepEpisodesAtTheSameScrollPosition() = runBlocking<Unit> {
+        val repo = withContext(Dispatchers.Main) { AppGraph.downloadRepository.also { it.awaitLoaded() } }
+        val index = repo.manager.downloadIndex as WritableDownloadIndex
+        val episodes = (1..40).map { Episode("episode-$it", "第 $it 集", it, null) }
+        val film = VideoDetail("library-delete-fixture", "下载管理验证", "", 1, episodes = episodes)
+        val positions = 12..15
+        val ids = positions.map { downloadId(film.mediaKey, episodes[it].episodeKey) }
+        val previous = StartupSession.mode
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val snapshots = withContext(Dispatchers.Main) { DownloadRuntime.get(instrumentation.targetContext).snapshots }
+        fun <T : View> sheetView(id: Int): T? =
+            WindowInspectorCompat.getGlobalWindowViews().firstNotNullOfOrNull { it.findViewById<T>(id) }
+        fun capture(name: String) {
+            // Wait for window transitions to finish before capturing the rendered state.
+            SystemClock.sleep(400)
+            val image = instrumentation.uiAutomation.takeScreenshot()
+            try {
+                File(instrumentation.targetContext.cacheDir, name).outputStream().use {
+                    image.compress(Bitmap.CompressFormat.PNG, 100, it)
+                }
+            } finally { image.recycle() }
+        }
+        try {
+            snapshots.saveFilm(film)
+            positions.zip(ids).forEach { (position, id) ->
+                val request = DownloadRequest.Builder(id, Uri.parse("file:///fixture.mp4"))
+                    .setData(DownloadMetadata(film, episodes[position], position, generation = "fixture").encode())
+                    .build()
+                val bytes = 128_000_000L
+                val progress = DownloadProgress().apply { bytesDownloaded = bytes }
+                index.putDownload(Download(request, Download.STATE_COMPLETED, Long.MAX_VALUE, 2L, bytes,
+                    0, Download.FAILURE_REASON_NONE, progress))
+            }
+            repo.awaitLoaded()
+            StartupSession.mode = AppMode.ONLINE
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                suspend fun awaitUi(stage: String, condition: (MainActivity) -> Boolean) {
+                    val deadline = SystemClock.elapsedRealtime() + 8_000
+                    while (SystemClock.elapsedRealtime() < deadline) {
+                        var matches = false
+                        scenario.onActivity { matches = condition(it) }
+                        if (matches) return
+                        delay(50)
+                    }
+                    throw AssertionError("Timed out waiting for $stage")
+                }
+                scenario.onActivity { it.findViewById<TabLayout>(R.id.bottomTabs).getTabAt(MainActivity.TAB_DOWNLOADS)!!.select() }
+                awaitUi("film card") { it.findViewById<RecyclerView>(R.id.films).findViewHolderForAdapterPosition(0) != null }
+                scenario.onActivity { it.findViewById<RecyclerView>(R.id.films).findViewHolderForAdapterPosition(0)!!.itemView.performClick() }
+                awaitUi("episode grid") { sheetView<RecyclerView>(R.id.episodes)?.childCount?.let { it > 0 } == true }
+                capture("download-library-manage-entry.png")
+                fun button(id: Int) = sheetView<TextView>(id)!!
+                scenario.onActivity {
+                    button(R.id.primaryButton).performClick()
+                    assertEquals(it.getString(R.string.download_library_manage_title), button(R.id.sheetTitle).text)
+                    assertFalse(button(R.id.primaryButton).isEnabled)
+                    button(R.id.manageDoneButton).performClick()
+                }
+                lateinit var grid: RecyclerView
+                lateinit var layout: GridLayoutManager
+                scenario.onActivity {
+                    grid = sheetView<RecyclerView>(R.id.episodes)!!
+                    layout = grid.layoutManager as GridLayoutManager
+                    layout.scrollToPositionWithOffset(12, 0)
+                }
+                awaitUi("scrolled episode grid") { grid.findViewHolderForAdapterPosition(12) != null }
+                fun row(position: Int) = grid.findViewHolderForAdapterPosition(position)!!.itemView
+                var anchor = 0
+                var offset = 0
+                scenario.onActivity {
+                    anchor = layout.findFirstVisibleItemPosition()
+                    offset = layout.findViewByPosition(anchor)!!.top
+                    assertTrue("Long press must enter management", row(12).performLongClick())
+                    assertEquals(it.getString(R.string.download_library_delete_count, 1), button(R.id.primaryButton).text)
+                }
+                awaitUi("selectable neighboring episode") { grid.findViewHolderForAdapterPosition(13)?.itemView?.isClickable == true }
+                scenario.onActivity {
+                    row(13).performClick()
+                    assertEquals(it.getString(R.string.download_library_delete_count, 2), button(R.id.primaryButton).text)
+                    button(R.id.primaryButton).performClick()
+                }
+                clickDialogChoice("取消")
+                scenario.onActivity {
+                    assertEquals(it.getString(R.string.download_library_delete_count, 2), button(R.id.primaryButton).text)
+                    assertTrue(ids.all { repo.get(it)?.download?.state == Download.STATE_COMPLETED })
+                    row(13).performClick()
+                    button(R.id.primaryButton).performClick()
+                }
+                clickDialogChoice("删除")
+                awaitUi("episode removed in place") {
+                    sheetView<RecyclerView>(R.id.episodes) === grid && repo.get(ids.first()) == null &&
+                        row(12).findViewById<TextView>(R.id.episodeState).text == it.getString(R.string.download_library_not_downloaded)
+                }
+                scenario.onActivity {
+                    assertEquals(anchor, layout.findFirstVisibleItemPosition())
+                    assertEquals(offset, layout.findViewByPosition(anchor)!!.top)
+                    assertFalse(row(12).isEnabled)
+                    assertFalse(button(R.id.primaryButton).isEnabled)
+                }
+                capture("download-library-delete-disabled.png")
+                scenario.onActivity {
+                    val all = button(R.id.selectAllButton)
+                    all.performClick()
+                    assertEquals(it.getString(R.string.download_library_delete_count, 3), button(R.id.primaryButton).text)
+                    all.performClick()
+                    assertFalse(button(R.id.primaryButton).isEnabled)
+                    all.performClick()
+                }
+                capture("download-library-delete-selected.png")
+                scenario.onActivity { button(R.id.primaryButton).performClick() }
+                clickDialogChoice("删除")
+                awaitUi("last downloads removed") {
+                    ids.all { repo.get(it) == null } && it.findViewById<RecyclerView>(R.id.films).adapter?.itemCount == 0
+                }
+                scenario.onActivity {
+                    assertTrue(grid.isShown)
+                    assertEquals(40, grid.adapter?.itemCount)
+                    assertEquals(anchor, layout.findFirstVisibleItemPosition())
+                    assertEquals(offset, layout.findViewByPosition(anchor)!!.top)
+                    assertFalse(button(R.id.selectAllButton).isEnabled)
+                    button(R.id.manageDoneButton).performClick()
+                    assertEquals(it.getString(R.string.download_library_episodes), button(R.id.sheetTitle).text)
+                    assertFalse(button(R.id.primaryButton).isEnabled)
+                }
+                capture("download-library-manage-empty.png")
+            }
+        } finally {
+            ids.forEach(index::removeDownload)
+            snapshots.removeFilm(film.mediaKey)
+            repo.awaitLoaded()
+            StartupSession.mode = previous
+        }
+    }
+
     @Test fun downloadSettingsReflectQueueChangesAfterReturning() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val previousMode = StartupSession.mode

@@ -2,9 +2,12 @@ package com.aiyifan.app.feature.download
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.text.format.Formatter
 import android.view.View
+import android.widget.TextView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
+import androidx.media3.exoplayer.scheduler.Requirements
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -44,6 +47,58 @@ class OfflineDownloadDeviceTest {
     @org.junit.After fun clearOnlineSession() { com.aiyifan.app.core.startup.StartupSession.mode = null }
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = ApplicationProvider.getApplicationContext<Context>()
+
+    @Test(timeout = 30_000)
+    fun queueShowsActualCacheSizeAfterDownloadAndRemovalWithoutReopening() = runBlocking {
+        FixtureServer(instrumentation.context).use { server ->
+            val repository = withContext(Dispatchers.Main) {
+                OfflineDownloadRepository(context, object : CatalogRepository by FakeCatalogRepository() {
+                    override suspend fun resolveDownload(detail: VideoDetail, episode: Episode) = episode
+                }).also { it.awaitLoaded() }
+            }
+            val previousNetwork = repository.mobileDataAllowed
+            val previousRequirements = withContext(Dispatchers.Main) { repository.manager.requirements }
+            val episode = Episode("storage-episode", "1", 1, server.url("/playback-test.mp4"))
+            val detail = VideoDetail("storage-fixture", "缓存容量验证", "", 1, episodes = listOf(episode))
+            val id = downloadId(detail.mediaKey, episode.episodeKey)
+            try {
+                withContext(Dispatchers.Main) {
+                    repository.remove(id)
+                    // This fixture is served on loopback and need not wait for internet validation.
+                    repository.manager.requirements = Requirements(0)
+                }
+                val before = repository.storageBytes().first
+                ActivityScenario.launch(DownloadsActivity::class.java).use { scenario ->
+                    suspend fun awaitUsedStorage(bytes: Long) = await {
+                        val expected = context.getString(R.string.download_storage, Formatter.formatShortFileSize(context, bytes), "")
+                        var matches = false
+                        scenario.onActivity {
+                            matches = it.findViewById<TextView>(R.id.storage).text.startsWith(expected)
+                        }
+                        matches
+                    }
+                    awaitUsedStorage(before)
+                    withContext(Dispatchers.Main) {
+                        repository.setMobileDataAllowed(true)
+                        repository.enqueue(detail, episode)
+                    }
+                    await { repository.get(id)?.download?.state == Download.STATE_COMPLETED }
+                    val after = repository.storageBytes().first
+                    assertTrue(after > before)
+                    awaitUsedStorage(after)
+                    withContext(Dispatchers.Main) { repository.remove(id) }
+                    assertEquals(before, repository.storageBytes().first)
+                    awaitUsedStorage(before)
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    repository.remove(id)
+                    repository.manager.requirements = previousRequirements
+                    repository.setMobileDataAllowed(previousNetwork)
+                }
+            }
+        }
+    }
 
     @Test(timeout = 120_000)
     fun offlineOverlayContinuesAfterServerStopsAndReturnsWithSameSession() = runBlocking {

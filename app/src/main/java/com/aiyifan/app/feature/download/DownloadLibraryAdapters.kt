@@ -102,30 +102,41 @@ internal fun bindLibraryEpisode(
     episode: LibraryEpisode,
     managing: Boolean,
     selected: Boolean,
-    allowUnavailableClick: Boolean = false,
+    removing: Boolean,
     click: () -> Unit,
+    longPress: () -> Boolean,
 ) {
     val context = binding.root.context
     val available = episode.state == LibraryEpisodeState.DOWNLOADED
-    val clickable = available || allowUnavailableClick && episode.state == LibraryEpisodeState.NOT_DOWNLOADED
+    val clickable = !removing && (available || !managing && episode.state == LibraryEpisodeState.NOT_DOWNLOADED)
+    val longClickable = available && !removing && !managing
+    val state = if (removing) LibraryEpisodeState.DOWNLOADED else episode.state
+    val watchPercent = episode.watchPercent?.takeIf { state == LibraryEpisodeState.DOWNLOADED }
     binding.episodeTitle.text = episode.episode.episodeTitle
-    binding.episodeState.text = episode.watchPercent?.let { context.getString(R.string.download_library_watched_percent, it) }
-        ?: context.getString(episode.state.label())
-    binding.episodeState.setTextColor(context.getColor(if (available) R.color.accent else R.color.text_secondary))
-    binding.root.isCheckable = managing
+    binding.episodeState.text = watchPercent?.let { context.getString(R.string.download_library_watched_percent, it) }
+        ?: context.getString(state.label())
+    binding.episodeState.setTextColor(context.getColor(if (state == LibraryEpisodeState.DOWNLOADED) R.color.accent else R.color.text_secondary))
+    // MaterialCardView ignores checked changes while disabled or not checkable.
+    binding.root.isEnabled = true
+    binding.root.isCheckable = true
     binding.root.isChecked = selected
+    binding.root.isCheckable = managing && clickable
     binding.root.strokeWidth = context.dp(if (selected) 2 else 1)
     binding.root.setStrokeColor(context.getColor(if (selected) R.color.accent else R.color.outline))
     binding.root.setCardBackgroundColor(context.getColor(if (selected) R.color.chip_selected else R.color.field_bg))
-    binding.root.isEnabled = clickable
-    binding.root.isClickable = clickable
-    binding.root.isFocusable = true
     binding.root.contentDescription = listOfNotNull(
         episode.episode.episodeTitle,
-        episode.watchPercent?.let { context.getString(R.string.download_library_watched_percent, it) },
-        context.getString(episode.state.label()),
+        watchPercent?.let { context.getString(R.string.download_library_watched_percent, it) },
+        context.getString(state.label()),
     ).joinToString("，")
-    binding.root.setOnClickListener { if (clickable) click() }
+    binding.root.setOnClickListener { click() }
+    binding.root.setOnLongClickListener { longPress() }
+    binding.root.isEnabled = clickable
+    binding.root.isClickable = clickable
+    binding.root.isLongClickable = longClickable
+    binding.root.isFocusable = true
+    ViewCompat.replaceAccessibilityAction(binding.root, AccessibilityActionCompat.ACTION_LONG_CLICK,
+        if (longClickable) context.getString(R.string.download_library_manage_title) else null, null)
 }
 
 internal fun LibraryEpisodeState.label(): Int = when (this) {

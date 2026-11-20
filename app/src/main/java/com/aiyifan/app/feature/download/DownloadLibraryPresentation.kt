@@ -46,19 +46,31 @@ internal fun downloadFilms(
     history: (String, String) -> WatchHistory? = { _, _ -> null },
 ): List<DownloadFilm> =
     entries.groupBy { it.detail.mediaKey }.mapNotNull { (key, tasks) ->
-        val sorted = tasks.sortedWith(compareBy<LibraryDownload> { it.order }.thenBy { it.episode.episodeKey })
-        val completed = sorted.filter { it.state == LibraryEpisodeState.DOWNLOADED }
-        if (completed.isEmpty()) return@mapNotNull null
-        val detail = snapshot(key) ?: sorted.first().detail
-        val known = (snapshot(key)?.episodes.orEmpty() + sorted.map { it.episode }).distinctBy { it.episodeKey }
-        val byEpisode = sorted.associateBy { it.episode.episodeKey }
-        val episodes = known.map { episode ->
-            val task = byEpisode[episode.episodeKey]
-            LibraryEpisode(episode, task?.state ?: LibraryEpisodeState.NOT_DOWNLOADED, task?.id,
-                history(key, episode.episodeKey)?.let { watchPercentage(it.progressMs, it.durationMs) })
-        }
-        DownloadFilm(detail, episodes, completed)
+        if (tasks.none { it.state == LibraryEpisodeState.DOWNLOADED }) return@mapNotNull null
+        downloadFilm(tasks, snapshot(key), history = history)
     }
+
+/** An open sheet keeps its original grid even if all of the video's downloads are removed. */
+internal fun downloadFilm(
+    entries: List<LibraryDownload>,
+    snapshot: VideoDetail?,
+    retained: DownloadFilm? = null,
+    history: (String, String) -> WatchHistory?,
+): DownloadFilm {
+    val sorted = entries.sortedWith(compareBy<LibraryDownload> { it.order }.thenBy { it.episode.episodeKey })
+    val detail = snapshot ?: retained?.detail ?: sorted.first().detail
+    val known = (retained?.episodes.orEmpty().map { it.episode } + snapshot?.episodes.orEmpty() +
+        sorted.map { it.episode }).distinctBy { it.episodeKey }
+    val byEpisode = sorted.associateBy { it.episode.episodeKey }
+    val episodes = known.map { episode ->
+        val task = byEpisode[episode.episodeKey]
+        LibraryEpisode(
+            episode, task?.state ?: LibraryEpisodeState.NOT_DOWNLOADED, task?.id,
+            history(detail.mediaKey, episode.episodeKey)?.let { watchPercentage(it.progressMs, it.durationMs) },
+        )
+    }
+    return DownloadFilm(detail, episodes, sorted.filter { it.state == LibraryEpisodeState.DOWNLOADED })
+}
 
 internal fun downloadFilms(entries: List<LibraryDownload>, snapshot: (String) -> VideoDetail?): List<DownloadFilm> =
     downloadFilms(entries, snapshot, { _, _ -> null })

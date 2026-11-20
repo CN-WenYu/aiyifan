@@ -21,5 +21,6 @@
     <string name="download_library_delete_title">删除离线视频？</string>
     <string name="download_library_delete_confirmation">选中的 %1$d 集离线视频将从此设备移除。</string>
     <string name="download_library_select_hint">选择要从设备移除的已下载剧集</string>
-    <string name="download_library_play_hint">已下载剧集可离线播放，未下载剧集点击即可加入队列</string>
+    <string name="download_library_no_downloaded_episodes">暂无已下载剧集</string>
+    <string name="download_library_play_hint">点按播放或下载，长按已下载剧集可管理</string>
 </resources>

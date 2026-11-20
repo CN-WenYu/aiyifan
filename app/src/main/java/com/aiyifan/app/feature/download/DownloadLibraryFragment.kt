@@ -33,6 +33,7 @@ class DownloadLibraryFragment : Fragment(R.layout.fragment_download_library) {
     private var films = emptyList<DownloadFilm>()
     private var sheet: DownloadLibrarySheet? = null
     private val busy = mutableSetOf<String>()
+    private val removingCompleted = mutableSetOf<String>()
 
     private var views: FragmentDownloadLibraryBinding? = null
     private var editing = false
@@ -74,24 +75,33 @@ class DownloadLibraryFragment : Fragment(R.layout.fragment_download_library) {
                 } catch (_: Exception) {
                     showFailure()
                 }
-                repository.tasks.collect { tasks ->
-                    films = downloadFilms(tasks.mapNotNull { task ->
-                        task.metadata?.let {
-                            LibraryDownload(task.id, it.detail, it.episode, it.episodeOrder, task.bytesDownloaded, repository.episodeState(task))
-                        }
-                    }, repository::filmSnapshot, AppGraph.catalogRepository::getEpisodeHistory)
-                    selected.retainAll(films.map { it.detail.mediaKey }.toSet())
-                    if (films.isEmpty()) editing = false
-                    render()
-                    sheet?.let { current -> current.update(films.firstOrNull { it.detail.mediaKey == current.mediaKey }) }
-                }
+                repository.tasks.collect(::renderDownloads)
             }
+        }
+    }
+
+    private fun renderDownloads(tasks: List<DownloadTask>) {
+        val entries = tasks.mapNotNull { task ->
+            task.metadata?.let {
+                LibraryDownload(task.id, it.detail, it.episode, it.episodeOrder, task.bytesDownloaded, repository.episodeState(task))
+            }
+        }
+        val history = AppGraph.catalogRepository::getEpisodeHistory
+        films = downloadFilms(entries, repository::filmSnapshot, history)
+        selected.retainAll(films.map { it.detail.mediaKey }.toSet())
+        if (films.isEmpty()) editing = false
+        render()
+        sheet?.let { current ->
+            current.update(
+                entries.filter { it.detail.mediaKey == current.mediaKey },
+                repository.filmSnapshot(current.mediaKey), history, removingCompleted,
+            )
         }
     }
 
     private fun render() {
         val binding = views ?: return
-        val queue = repository.tasks.value.filter { it.inQueue }
+        val queue = repository.tasks.value.filter { it.inQueue && it.id !in removingCompleted }
         adapter.submitList(films.map {
             val key = it.detail.mediaKey
             DownloadFilmRow(it, repository.posterFile(key), editing, key in selected)
@@ -186,8 +196,21 @@ class DownloadLibraryFragment : Fragment(R.layout.fragment_download_library) {
     }
 
     private fun remove(ids: List<String>) {
-        ids.filter { repository.get(it)?.download?.state == Download.STATE_COMPLETED }.forEach { id ->
-            operation(id) { repository.remove(id) }
+        val targets = ids.filter {
+            it !in busy && repository.get(it)?.download?.state == Download.STATE_COMPLETED
+        }
+        if (targets.isEmpty()) return
+        removingCompleted.addAll(targets)
+        renderDownloads(repository.tasks.value)
+        targets.forEach { id ->
+            operation(id) {
+                try {
+                    repository.remove(id)
+                } finally {
+                    removingCompleted.remove(id)
+                    renderDownloads(repository.tasks.value)
+                }
+            }
         }
     }
 
