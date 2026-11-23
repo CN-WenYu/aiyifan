@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="anime_trending_poster_width">128dp</dimen>
+    <dimen name="anime_grid_poster_min_width">104dp</dimen>
+    <dimen name="anime_section_text_size">18sp</dimen>
+    <style name="AnimeExploreSectionTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/dp_12</item>
+        <item name="android:layout_marginBottom">@dimen/dp_8</item>
+        <item name="android:paddingStart">@dimen/dp_6</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">@dimen/anime_section_text_size</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="AnimeExploreAction">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minWidth">@dimen/dp_48</item>
+        <item name="android:minHeight">@dimen/dp_48</item>
+        <item name="android:paddingStart">@dimen/dp_8</item>
+        <item name="android:paddingEnd">@dimen/dp_8</item>
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textSize">@dimen/sp_13</item>
+    </style>
+</resources>

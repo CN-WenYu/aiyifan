@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Android 7.0 predates ISRG Root X1. Add the public root only for Bangumi API and cover requests. -->
+    <!-- Android 7.0 predates ISRG Root X1. Add it for services that use its trust chain. -->
     <domain-config>
         <domain includeSubdomains="false">api.bgm.tv</domain>
         <domain includeSubdomains="false">lain.bgm.tv</domain>
+        <domain includeSubdomains="false">api.animeko.org</domain>
         <trust-anchors>
             <certificates src="system" />
             <certificates src="@raw/isrg_root_x1" />

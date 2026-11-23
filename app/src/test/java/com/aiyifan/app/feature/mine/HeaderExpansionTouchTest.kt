@@ -9,7 +9,6 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.widget.ScrollView
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.feature.main.MainActivity
@@ -41,10 +40,9 @@ class HeaderExpansionTouchTest {
         val activity = controller.get()
         activity.setTheme(R.style.AppTheme)
         AppGraph.initialize(activity)
-        controller.create(Bundle().apply { putInt(MainActivity.KEY_SELECTED_TAB, MainActivity.TAB_MINE) }).start().resume().visible()
-        val frame = activity.findViewById<FrameLayout>(R.id.fragmentContainer)
-        val fragment = MineFragment()
-        activity.supportFragmentManager.beginTransaction().add(frame.id, fragment).commitNow()
+        controller.create(Bundle().apply { putString(MainActivity.KEY_SELECTED_DESTINATION, "MINE") })
+            .start().resume().visible()
+        val fragment = activity.supportFragmentManager.primaryNavigationFragment as MineFragment
         val decor = activity.window.decorView
         val page = fragment.requireView() as ScrollView
         // Keep the scrolling regression meaningful on tall test windows after removing

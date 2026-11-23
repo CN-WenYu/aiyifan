@@ -63,6 +63,7 @@
             android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize"
             android:exported="false"
             android:supportsPictureInPicture="true" />
+        <activity android:name=".feature.anime.AnimeBrowseActivity" android:exported="false" />
         <activity
             android:name=".feature.search.SearchActivity"
             android:exported="false"

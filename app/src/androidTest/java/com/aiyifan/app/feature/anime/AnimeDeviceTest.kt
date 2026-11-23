@@ -2,15 +2,23 @@ package com.aiyifan.app.feature.anime
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
+import android.graphics.drawable.BitmapDrawable
 import android.os.SystemClock
 import android.view.View
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageView
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.aiyifan.app.BuildConfig
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.Episode
@@ -20,6 +28,7 @@ import com.aiyifan.app.core.startup.StartupSession
 import com.aiyifan.app.feature.main.MainActivity
 import com.aiyifan.app.feature.search.SearchActivity
 import com.aiyifan.app.feature.video.VideoPlayerActivity
+import com.google.android.material.tabs.TabLayout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -47,20 +56,233 @@ class AnimeDeviceTest {
     }
 
     @Test
-    fun homeExposesAnimeSearchWithItsOwnPrompt() {
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity ->
-                val entry = activity.findViewById<View>(R.id.animeButton)
-                assertEquals(View.VISIBLE, entry.visibility)
+    fun bottomTabRestoresExploreAndOpensAnimeSearch() {
+        assumeTrue(BuildConfig.ANIME_ENABLED)
+        val monitor = instrumentation.addMonitor(SearchActivity::class.java.name, null, false)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                selectExplore(scenario)
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    val tabs = activity.findViewById<TabLayout>(R.id.bottomTabs)
+                    assertEquals(2, tabs.selectedTabPosition)
+                    assertTrue(activity.findViewById<View>(R.id.animeSearch).performClick())
+                }
+                val search = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 6_000L))
+                instrumentation.runOnMainSync {
+                    val hint = search.findViewById<EditText>(R.id.searchEdit).hint
+                    assertEquals(context.getString(R.string.anime_search_hint), hint.toString())
+                    search.finish()
+                }
             }
-            screenshot("anime-home")
+        } finally {
+            instrumentation.removeMonitor(monitor)
         }
-        ActivityScenario.launch<SearchActivity>(SearchActivity.animeIntent(context)).use { scenario ->
-            scenario.onActivity { activity ->
-                assertEquals(context.getString(R.string.anime_search_hint), activity.findViewById<EditText>(R.id.searchEdit).hint.toString())
+    }
+
+    @Test
+    fun liveExploreShowsBothFeedsAndOpensScheduleRankingAndContinueWatching() {
+        assumeTrue(BuildConfig.ANIME_ENABLED)
+        assumeTrue(InstrumentationRegistry.getArguments().getString("animeExploreLive") == "true")
+        val originalMode = AppCompatDelegate.getDefaultNightMode()
+        val episode = Episode("bangumi:90000002", "1 · 正片", 90000002, null)
+        AppGraph.catalogRepository.saveHistory(
+            VideoDetail(TEST_MEDIA_KEY, "追番播放验证", "", 2, episodes = listOf(episode)),
+            episode,
+            150_000L,
+            1_200_000L,
+        )
+        try {
+            setNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                selectExplore(scenario)
+                awaitExploreFeed(scenario)
+                screenshot("anime-explore-light")
+                verifyPosterNavigation(scenario)
+                verifySchedule(scenario)
+                verifyRanking(scenario)
+                verifyRecommendationPaging(scenario)
+                verifyContinueWatching(scenario)
             }
-            screenshot("anime-search")
+            setNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                selectExplore(scenario)
+                awaitExploreFeed(scenario)
+                screenshot("anime-explore-dark")
+            }
+        } finally {
+            setNightMode(originalMode)
         }
+    }
+
+    private fun selectExplore(scenario: ActivityScenario<MainActivity>) {
+        scenario.onActivity { activity ->
+            val tabs = activity.findViewById<TabLayout>(R.id.bottomTabs)
+            assertEquals(5, tabs.tabCount)
+            assertEquals(context.getString(R.string.anime_entry), tabs.getTabAt(2)?.text)
+            tabs.getTabAt(2)?.select()
+        }
+    }
+
+    private fun awaitExploreFeed(scenario: ActivityScenario<MainActivity>) {
+        await("both exploration feeds") {
+            var loaded = false
+            scenario.onActivity { activity ->
+                val list = activity.findViewById<RecyclerView>(R.id.animeExploreList)
+                val trending = list.findViewById<RecyclerView>(R.id.animeTrendingList)
+                loaded = (trending?.adapter?.itemCount ?: 0) in 1..10 && (list.adapter?.itemCount ?: 0) > 2
+                if (loaded) {
+                    val grid = list.layoutManager as GridLayoutManager
+                    assertTrue(grid.spanCount >= 2)
+                }
+            }
+            loaded
+        }
+        await("visible trending and recommended posters") {
+            var loaded = false
+            scenario.onActivity { activity ->
+                val list = activity.findViewById<RecyclerView>(R.id.animeExploreList)
+                val trending = list.findViewById<RecyclerView>(R.id.animeTrendingList)
+                val featured = trending.findViewHolderForAdapterPosition(0)?.itemView?.findViewById<ImageView>(R.id.animePoster)
+                val recommended = list.findViewHolderForAdapterPosition(1)?.itemView?.findViewById<ImageView>(R.id.animePoster)
+                loaded = featured?.drawable is BitmapDrawable && recommended?.drawable is BitmapDrawable
+            }
+            loaded
+        }
+    }
+
+    private fun verifySchedule(scenario: ActivityScenario<MainActivity>) {
+        withBrowsePage(scenario, R.id.animeSchedule, R.string.anime_airing_schedule) { browse ->
+            await("today selected in the airing schedule") {
+                onMain {
+                    val days = browse.findViewById<TabLayout>(R.id.animeScheduleDays)
+                    val position = days.selectedTabPosition
+                    val visibleTab = (days.getChildAt(0) as? ViewGroup)?.getChildAt(position)
+                    days.isShown && days.getTabAt(position)?.text?.startsWith("今天") == true &&
+                        visibleTab?.getGlobalVisibleRect(Rect()) == true
+                }
+            }
+            screenshot("anime-airing")
+        }
+    }
+
+    private fun verifyRanking(scenario: ActivityScenario<MainActivity>) {
+        withBrowsePage(scenario, R.id.animeRanking, R.string.anime_ranking) { browse ->
+            val list = browse.findViewById<RecyclerView>(R.id.animeBrowseList)
+            try {
+                await("ranking starts on the highest ranked title") {
+                    onMain {
+                        val first = list.findViewHolderForAdapterPosition(0)
+                        first?.itemView?.findViewById<TextView>(R.id.animeBrowseRowMeta)
+                            ?.text?.startsWith("第 1 名") == true
+                    }
+                }
+            } catch (error: IllegalStateException) {
+                screenshot("anime-ranking-failure")
+                throw error
+            }
+            screenshot("anime-ranking")
+            verifyNextPage(list, "ranking")
+        }
+    }
+
+    private fun verifyRecommendationPaging(scenario: ActivityScenario<MainActivity>) {
+        var exploreList: RecyclerView? = null
+        scenario.onActivity { exploreList = it.findViewById(R.id.animeExploreList) }
+        val list = checkNotNull(exploreList)
+        verifyNextPage(list, "recommendation")
+        instrumentation.runOnMainSync { list.scrollToPosition(0) }
+        await("continue watching row back in view") { onMain { list.findViewById<View>(R.id.animeContinueList) != null } }
+    }
+
+    private fun verifyNextPage(list: RecyclerView, name: String) {
+        await("first $name page laid out") {
+            onMain { (list.adapter?.itemCount ?: 0) >= 24 && list.canScrollVertically(1) }
+        }
+        var initialCount = 0
+        instrumentation.runOnMainSync {
+            initialCount = checkNotNull(list.adapter).itemCount
+            list.smoothScrollToPosition(initialCount - 1)
+        }
+        var lastVisible = -1
+        var currentCount = 0
+        try {
+            await("second $name page") {
+                onMain {
+                    lastVisible = (list.layoutManager as LinearLayoutManager).findLastVisibleItemPosition()
+                    currentCount = list.adapter?.itemCount ?: 0
+                    currentCount > initialCount
+                }
+            }
+        } catch (error: IllegalStateException) {
+            throw AssertionError("$name did not append: count=$currentCount, initial=$initialCount, lastVisible=$lastVisible", error)
+        }
+    }
+
+    private fun verifyPosterNavigation(scenario: ActivityScenario<MainActivity>) {
+        val monitor = instrumentation.addMonitor(VideoPlayerActivity::class.java.name, null, false)
+        try {
+            scenario.onActivity {
+                val trending = it.findViewById<RecyclerView>(R.id.animeTrendingList)
+                assertTrue(checkNotNull(trending.findViewHolderForAdapterPosition(0)).itemView.performClick())
+            }
+            val player = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 6_000L))
+            instrumentation.runOnMainSync {
+                assertTrue(player.intent.getStringExtra("mediaKey")?.startsWith("bangumi:") == true)
+                player.finish()
+            }
+            await("return from trending details") { onMain { player.isDestroyed } }
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
+    }
+
+    private fun withBrowsePage(
+        scenario: ActivityScenario<MainActivity>,
+        action: Int,
+        title: Int,
+        checkPage: (AnimeBrowseActivity) -> Unit,
+    ) {
+        val monitor = instrumentation.addMonitor(AnimeBrowseActivity::class.java.name, null, false)
+        try {
+            scenario.onActivity { assertTrue(it.findViewById<View>(action).performClick()) }
+            val browse = instrumentation.waitForMonitorWithTimeout(monitor, 6_000L) as? AnimeBrowseActivity
+                ?: error("Explore did not open its browse page")
+            try {
+                instrumentation.runOnMainSync {
+                    assertEquals(context.getString(title), browse.findViewById<TextView>(R.id.animeBrowseTitle).text)
+                }
+                checkPage(browse)
+            } finally {
+                instrumentation.runOnMainSync { browse.finish() }
+                await("return to Explore") { onMain { browse.isDestroyed } }
+            }
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
+    }
+
+    private fun verifyContinueWatching(scenario: ActivityScenario<MainActivity>) {
+        val monitor = instrumentation.addMonitor(VideoPlayerActivity::class.java.name, null, false)
+        try {
+            scenario.onActivity {
+                val history = it.findViewById<RecyclerView>(R.id.animeContinueList)
+                val card = checkNotNull(history.findViewHolderForAdapterPosition(0))
+                assertEquals("追番播放验证", card.itemView.findViewById<TextView>(R.id.title).text)
+                assertTrue(card.itemView.performClick())
+            }
+            val player = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 6_000L))
+            instrumentation.runOnMainSync {
+                assertEquals(TEST_MEDIA_KEY, player.intent.getStringExtra("mediaKey"))
+                player.finish()
+            }
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
+    }
+
+    private fun setNightMode(mode: Int) {
+        instrumentation.runOnMainSync { AppCompatDelegate.setDefaultNightMode(mode) }
     }
 
     @Test

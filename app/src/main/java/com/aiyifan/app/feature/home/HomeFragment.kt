@@ -20,7 +20,6 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.RecyclerView
 import androidx.core.view.isVisible
-import com.aiyifan.app.BuildConfig
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.Category
@@ -111,8 +110,6 @@ class HomeFragment : Fragment() {
             }
         })
         binding.searchBox.setOnClickListener { startActivity(Intent(requireContext(), SearchActivity::class.java)) }
-        binding.animeButton.isVisible = BuildConfig.ANIME_ENABLED
-        binding.animeButton.setOnClickListener { startActivity(SearchActivity.animeIntent(requireContext())) }
         binding.historyButton.setOnClickListener { startActivity(Intent(requireContext(), HistoryActivity::class.java)) }
         binding.navigationButton.setOnClickListener {
             startActivity(Intent(requireContext(), com.aiyifan.app.feature.navigation.NavigationActivity::class.java))

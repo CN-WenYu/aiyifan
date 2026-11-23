@@ -9,6 +9,7 @@
     <domain-config>
         <domain includeSubdomains="false">api.bgm.tv</domain>
         <domain includeSubdomains="false">lain.bgm.tv</domain>
+        <domain includeSubdomains="false">api.animeko.org</domain>
         <trust-anchors>
             <certificates src="system" />
             <certificates src="@raw/isrg_root_x1" />

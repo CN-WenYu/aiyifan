@@ -18,11 +18,13 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import com.aiyifan.app.BuildConfig
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.R
 import com.aiyifan.app.core.ui.applySystemBarsPadding
 import com.aiyifan.app.core.ui.setupEdgeToEdge
 import com.aiyifan.app.databinding.ActivityMainBinding
+import com.aiyifan.app.feature.anime.AnimeExploreFragment
 import com.aiyifan.app.feature.download.DownloadLibraryFragment
 import com.aiyifan.app.feature.home.HomeFragment
 import com.aiyifan.app.feature.shortdrama.ShortDramaFragment
@@ -75,27 +77,25 @@ class MainActivity : AppCompatActivity() {
         }
         binding.bottomTabs.applySystemBarsPadding(left = true, right = true, bottom = true, growHeight = true)
 
-        val selectedTabPosition = (savedInstanceState?.getInt(KEY_SELECTED_TAB) ?: 0).takeIf {
-            it in 0 until binding.bottomTabs.tabCount
-        } ?: 0
-        for (index in 0 until binding.bottomTabs.tabCount) {
-            val tab = binding.bottomTabs.getTabAt(index) ?: continue
+        val initialDestination = restoreDestination(savedInstanceState)
+        for (destination in destinations) {
+            val tab = binding.bottomTabs.newTab().setText(destination.label)
             tab.customView = TextView(this).apply {
                 text = tab.text
                 gravity = Gravity.CENTER
                 maxLines = 1
                 importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
+            binding.bottomTabs.addTab(tab, false)
         }
+        val selectedTabPosition = destinations.indexOf(initialDestination)
         binding.bottomTabs.getTabAt(selectedTabPosition)?.select()
         updateTabTextSizes(selectedTabPosition)
-        if (savedInstanceState == null) {
-            show(fragmentFor(selectedTabPosition))
-        }
+        show(fragmentFor(initialDestination))
         binding.bottomTabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {
                 updateTabTextSizes(tab.position)
-                show(fragmentFor(tab.position))
+                show(fragmentFor(destinations[tab.position]))
                 ViewCompat.requestApplyInsets(window.decorView)
             }
 
@@ -117,30 +117,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        if (::binding.isInitialized) outState.putInt(KEY_SELECTED_TAB, binding.bottomTabs.selectedTabPosition)
+        if (::binding.isInitialized) {
+            val destination = destinations.getOrNull(binding.bottomTabs.selectedTabPosition)
+            outState.putString(KEY_SELECTED_DESTINATION, destination?.name)
+        }
         super.onSaveInstanceState(outState)
     }
 
-    private fun fragmentFor(position: Int): Fragment {
-        val type = when (position) {
-            1 -> ShortDramaFragment::class.java
-            TAB_DOWNLOADS -> DownloadLibraryFragment::class.java
-            TAB_MINE -> MineFragment::class.java
-            else -> HomeFragment::class.java
+    private fun restoreDestination(state: Bundle?): Destination {
+        val savedName = state?.getString(KEY_SELECTED_DESTINATION)
+        val saved = if (savedName != null) {
+            destinations.find { it.name == savedName }
+        } else {
+            legacyDestinations.getOrNull(state?.getInt(KEY_SELECTED_TAB) ?: 0)
         }
-        supportFragmentManager.findFragmentByTag(type.name)?.let { return it }
-        return when (position) {
-            1 -> ShortDramaFragment()
-            TAB_DOWNLOADS -> DownloadLibraryFragment()
-            TAB_MINE -> MineFragment()
-            else -> HomeFragment.newInstance(intent.getStringExtra(EXTRA_CATEGORY_ID))
+        return saved ?: Destination.HOME
+    }
+
+    private fun fragmentFor(destination: Destination): Fragment {
+        supportFragmentManager.findFragmentByTag(destination.fragmentType.name)?.let { return it }
+        return when (destination) {
+            Destination.HOME -> HomeFragment.newInstance(intent.getStringExtra(EXTRA_CATEGORY_ID))
+            Destination.SHORT_DRAMA -> ShortDramaFragment()
+            Destination.ANIME -> AnimeExploreFragment()
+            Destination.DOWNLOADS -> DownloadLibraryFragment()
+            Destination.MINE -> MineFragment()
         }
     }
 
     private fun show(fragment: Fragment) {
         val transaction = supportFragmentManager.beginTransaction()
         supportFragmentManager.fragments.filter { it.id == R.id.fragmentContainer && it !== fragment }.forEach {
-            transaction.hide(it).setMaxLifecycle(it, Lifecycle.State.STARTED)
+            if (!BuildConfig.ANIME_ENABLED && it is AnimeExploreFragment) transaction.remove(it)
+            else transaction.hide(it).setMaxLifecycle(it, Lifecycle.State.STARTED)
         }
         if (fragment.isAdded) transaction.show(fragment)
         else transaction.add(R.id.fragmentContainer, fragment, fragment.javaClass.name)
@@ -153,10 +162,21 @@ class MainActivity : AppCompatActivity() {
         binding.bottomTabs.getTabAt(0)?.select()
     }
 
+    private enum class Destination(val label: Int, val fragmentType: Class<out Fragment>) {
+        HOME(R.string.tab_home, HomeFragment::class.java),
+        SHORT_DRAMA(R.string.tab_short_drama, ShortDramaFragment::class.java),
+        ANIME(R.string.anime_entry, AnimeExploreFragment::class.java),
+        DOWNLOADS(R.string.download_action, DownloadLibraryFragment::class.java),
+        MINE(R.string.tab_mine, MineFragment::class.java),
+    }
+
     companion object {
-        internal const val TAB_DOWNLOADS = 2
-        internal const val TAB_MINE = 3
+        private val legacyDestinations = Destination.entries.filter { it != Destination.ANIME }
+        private val destinations = if (BuildConfig.ANIME_ENABLED) Destination.entries else legacyDestinations
+        internal val TAB_DOWNLOADS = destinations.indexOf(Destination.DOWNLOADS)
+        internal val TAB_MINE = destinations.indexOf(Destination.MINE)
         const val KEY_SELECTED_TAB = "selected_tab"
+        internal const val KEY_SELECTED_DESTINATION = "selected_destination"
         const val EXTRA_CATEGORY_ID = "categoryId"
 
         fun intent(context: android.content.Context, categoryId: String): android.content.Intent =
