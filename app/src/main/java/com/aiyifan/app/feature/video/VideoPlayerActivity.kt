@@ -589,7 +589,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         if (!ScreenOffPlaybackObserver.canPlay(this)) return
         when (currentDestination()) {
             PlaybackDestination.PICTURE_IN_PICTURE -> {
-                if (!enterSystemPictureInPicture()) {
+                if (!enterSystemPictureInPicture() && !isFullScreen) {
                     showInAppMiniPlayer()
                 }
             }

@@ -2,6 +2,7 @@ package com.aiyifan.app.feature.video
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.InputDevice
@@ -17,10 +18,13 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
+import com.aiyifan.app.feature.main.MainActivity
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -115,6 +119,81 @@ class PlayerExperienceDeviceTest {
 
     @Test
     @androidx.test.filters.SdkSuppress(minSdkVersion = 26)
+    fun launcherReturnRestoresFullscreenWhenSystemPipIsDenied() = withSeededPlayback(startIndex = 1) { detail, controller ->
+        org.junit.Assume.assumeTrue(context.packageManager.hasSystemFeature(
+            android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE,
+        ))
+        val app = context.packageName
+        val operation = "PICTURE_IN_PICTURE"
+        val previousMode = requireNotNull(
+            Regex("(?:$operation|Default mode): (allow|ignore|deny|default|foreground)")
+                .find(shell("appops get $app $operation")),
+        ).groupValues[1]
+        val launcher = requireNotNull(context.packageManager.getLaunchIntentForPackage(app)?.component)
+        val launchCommand = "am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER " +
+            "-f 0x10200000 -n ${launcher.flattenToShortString()}"
+        val lifecycleMonitor = ActivityLifecycleMonitorRegistry.getInstance()
+        fun resumedActivities() = lifecycleMonitor.getActivitiesInStage(Stage.RESUMED)
+        var main: MainActivity? = null
+        var player: VideoPlayerActivity? = null
+        try {
+            shell("appops set $app $operation ignore")
+            assertTrue(shell("appops get $app $operation").contains("$operation: ignore"))
+            shell("$launchCommand --activity-clear-task")
+            await { resumedActivities().any { it is MainActivity } }
+            mainValue {
+                val mainActivity = resumedActivities().filterIsInstance<MainActivity>().single()
+                main = mainActivity
+                mainActivity.startActivity(VideoPlayerActivity.intent(mainActivity, detail.mediaKey))
+            }
+            await { controller.canSeek && resumedActivities().any { it is VideoPlayerActivity } }
+            val activity = mainValue {
+                resumedActivities().filterIsInstance<VideoPlayerActivity>().single().also {
+                    player = it
+                    it.findViewById<ImageButton>(R.id.fullScreenButton).performClick()
+                    controller.seekTo(2_000L)
+                    controller.togglePlayPause()
+                }
+            }
+            await { activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && controller.isPlaying }
+            shell("input keyevent KEYCODE_HOME")
+            await { !activity.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+            val pausedPosition = mainValue {
+                assertFalse(activity.isInPictureInPictureMode)
+                assertFalse(controller.playWhenReady)
+                controller.currentPositionMs.also { assertTrue(it >= 2_000L) }
+            }
+
+            shell(launchCommand)
+            await { activity in resumedActivities() && activity.hasWindowFocus() }
+            mainValue {
+                assertEquals(
+                    "Returning from Home must not show the in-app mini player",
+                    View.GONE,
+                    activity.findViewById<View>(R.id.inAppMiniPlayer).visibility,
+                )
+                assertEquals(Configuration.ORIENTATION_LANDSCAPE, activity.resources.configuration.orientation)
+                assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.playerContainer).visibility)
+                val playerView = activity.findViewById<androidx.media3.ui.PlayerView>(R.id.playerView)
+                assertNotNull(playerView.player)
+                assertTrue(playerView.useController)
+                assertEquals("qa-second", controller.activeSession?.episode?.episodeKey)
+                assertTrue(kotlin.math.abs(controller.currentPositionMs - pausedPosition) < 500L)
+                assertFalse(controller.playWhenReady)
+            }
+            shell("input keyevent KEYCODE_BACK")
+            await { activity in resumedActivities() && activity.findViewById<View>(R.id.contentScroll).isShown }
+        } finally {
+            mainValue {
+                player?.finish()
+                main?.finish()
+            }
+            shell("appops set $app $operation $previousMode")
+        }
+    }
+
+    @Test
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 26)
     fun systemPipContainsOnlyVideoAndReturnsToDetail() = withPlayback { scenario, controller ->
         org.junit.Assume.assumeTrue(context.packageManager.hasSystemFeature(
             android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE,
@@ -136,11 +215,25 @@ class PlayerExperienceDeviceTest {
             assertEquals(View.GONE, activity.findViewById<View>(R.id.contentScroll).visibility)
         }
         screenshot("system-pip.png")
-        mainValue {
-            activity.startActivity(VideoPlayerActivity.intent(activity, controller.activeSession!!.detail.mediaKey)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        val originalFlags = automation.serviceInfo.flags
+        try {
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+            val pipBounds = Rect()
+            automation.windows.first { it.isInPictureInPictureMode }.getBoundsInScreen(pipBounds)
+            shell("input tap ${pipBounds.centerX()} ${pipBounds.centerY()}")
+            val expand = waitForNode("expand_button", "com.android.systemui")
+            assertTrue(expand.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        } finally {
+            automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
         }
-        await { !activity.isInPictureInPictureMode }
+        // Android can recreate the player Activity when leaving the pinned window.
+        await {
+            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                .filterIsInstance<VideoPlayerActivity>().any { !it.isInPictureInPictureMode && it.hasWindowFocus() }
+        }
         instrumentation.waitForIdleSync()
         scenario.onActivity {
             assertEquals(View.VISIBLE, it.findViewById<View>(R.id.contentScroll).visibility)
@@ -680,6 +773,18 @@ class PlayerExperienceDeviceTest {
         episodeCount: Int = 2,
         startIndex: Int = 0,
         block: (ActivityScenario<VideoPlayerActivity>, VideoPlaybackController) -> Unit,
+    ) = withSeededPlayback(episodeCount, startIndex) { detail, controller ->
+        ActivityScenario.launch<VideoPlayerActivity>(VideoPlayerActivity.intent(context, detail.mediaKey)).use { scenario ->
+            await { controller.canSeek }
+            instrumentation.waitForIdleSync()
+            block(scenario, controller)
+        }
+    }
+
+    private fun withSeededPlayback(
+        episodeCount: Int = 2,
+        startIndex: Int = 0,
+        block: (VideoDetail, VideoPlaybackController) -> Unit,
     ) {
         shell("input keyevent KEYCODE_WAKEUP")
         shell("wm dismiss-keyguard")
@@ -701,11 +806,7 @@ class PlayerExperienceDeviceTest {
             controller.prepare(detail, episodes[startIndex], shouldPlay = false)
         }
         try {
-            ActivityScenario.launch<VideoPlayerActivity>(VideoPlayerActivity.intent(context, detail.mediaKey)).use { scenario ->
-                await { controller.canSeek }
-                instrumentation.waitForIdleSync()
-                block(scenario, controller)
-            }
+            block(detail, controller)
         } finally {
             mainValue { controller.release() }
             preferences.edit().putString("watch_history", originalHistory).commit()
@@ -750,14 +851,14 @@ class PlayerExperienceDeviceTest {
         send(MotionEvent.ACTION_UP, 1, factor, 11)
     }
 
-    private fun node(id: String): AccessibilityNodeInfo? = automation.windows.asSequence()
-        .mapNotNull { it.root }.flatMap { it.findAccessibilityNodeInfosByViewId("${context.packageName}:id/$id").asSequence() }
+    private fun node(id: String, packageName: String = context.packageName): AccessibilityNodeInfo? = automation.windows.asSequence()
+        .mapNotNull { it.root }.flatMap { it.findAccessibilityNodeInfosByViewId("$packageName:id/$id").asSequence() }
         .firstOrNull { it.isVisibleToUser }
 
-    private fun waitForNode(id: String): AccessibilityNodeInfo {
+    private fun waitForNode(id: String, packageName: String = context.packageName): AccessibilityNodeInfo {
         val deadline = SystemClock.elapsedRealtime() + 8_000L
         while (SystemClock.elapsedRealtime() < deadline) {
-            node(id)?.let { return it }
+            node(id, packageName)?.let { return it }
             SystemClock.sleep(100L)
         }
         error("Missing visible control: $id")
