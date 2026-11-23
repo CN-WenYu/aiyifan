@@ -43,6 +43,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.aiyifan.app.R
 import com.aiyifan.app.core.data.AppGraph
+import com.aiyifan.app.core.data.anime.isAnimeKey
 import com.aiyifan.app.feature.download.DownloadSelectionDialog
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
@@ -78,6 +79,7 @@ class VideoPlayerActivity : AppCompatActivity() {
     private var removeStateListener: (() -> Unit)? = null
     private var playbackJob: Job? = null
     private var detailJob: Job? = null
+    private var animeDetailFailed = false
     private var overlayHandoffPending = false
     private var openingOverlaySettings = false
     private var overlayRequestId = 0L
@@ -156,8 +158,10 @@ class VideoPlayerActivity : AppCompatActivity() {
         binding.playerView.findViewById<View>(R.id.playerSleepTimerButton).setOnClickListener { showSleepTimer() }
         binding.inAppMiniSleepTimerButton.setOnClickListener { showSleepTimer() }
         binding.downloadButton.setOnClickListener {
-            detail?.takeUnless { playbackController.isOffline }?.let { DownloadSelectionDialog.show(this, it) }
+            detail?.takeUnless { playbackController.isOffline || it.mediaKey.isAnimeKey() }
+                ?.let { DownloadSelectionDialog.show(this, it) }
         }
+        binding.animePlaybackRetry.setOnClickListener { retryAnimePlayback() }
         binding.floatingWindowButton.setOnClickListener { showFloatingPresentation() }
         binding.autoSkipIntroOutroSwitch.apply {
             isChecked = autoSkipPreferenceStore.isEnabled()
@@ -217,6 +221,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             binding.playerView.findViewById<android.widget.TextView>(R.id.playerSleepTimerButton).text = timerLabel
             binding.inAppMiniSleepTimerButton.text = timerLabel
             syncFromActivePlaybackSession()
+            renderAnimePlaybackRetry()
             updateEpisodeButtons()
             updateInAppMiniPlayPauseButton()
             renderNextEpisodeHint()
@@ -228,6 +233,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             }
         }
         syncFromActivePlaybackSession()
+        renderAnimePlaybackRetry()
         if (needsLoad) loadRequestedDetail(mediaKey)
         val recovery = FloatingPlayerRecovery.consumePosition(this)
         if (playbackController.activeSession?.detail?.mediaKey == intent.getStringExtra(EXTRA_MEDIA_KEY)) {
@@ -266,7 +272,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
     private fun loadRequestedDetail(mediaKey: String) {
         val downloadId = offlineDownloadId
-        binding.downloadButton.isVisible = downloadId == null
+        binding.downloadButton.isVisible = downloadId == null && !mediaKey.isAnimeKey()
         if (downloadId == null) {
             loadDetail(mediaKey)
         } else {
@@ -332,6 +338,8 @@ class VideoPlayerActivity : AppCompatActivity() {
             attachPlayerToCurrentSurface()
             return
         }
+        animeDetailFailed = false
+        renderAnimePlaybackRetry()
         binding.title.setText(R.string.video_loading)
         binding.videoTitle.setText(R.string.video_loading)
         binding.fullScreenVideoTitle.setText(R.string.video_loading)
@@ -341,10 +349,11 @@ class VideoPlayerActivity : AppCompatActivity() {
                 .onSuccess { loadedDetail ->
                     if (playbackController.requestedMediaKey != mediaKey || playbackController.isOffline) return@onSuccess
                     detail = loadedDetail
-                    AppGraph.downloadRepository.rememberFilm(loadedDetail)
+                    if (!mediaKey.isAnimeKey()) AppGraph.downloadRepository.rememberFilm(loadedDetail)
                     renderDetail(loadedDetail)
                     AppGraph.catalogRepository.markFavoriteEpisodesKnown(loadedDetail)
                     val history = AppGraph.catalogRepository.getHistory().firstOrNull { it.mediaKey == mediaKey }
+                    if (mediaKey.isAnimeKey() && history == null) return@onSuccess
                     PlaybackResumePolicy.target(loadedDetail, history)?.let { target ->
                         episodeAdapter.submitList(loadedDetail.episodes, target.episode)
                         loadEpisodePlayback(loadedDetail, target.episode, resumePositionMs = target.positionMs)
@@ -353,8 +362,14 @@ class VideoPlayerActivity : AppCompatActivity() {
                 .onFailure { error ->
                     if (error is CancellationException) throw error
                     if (playbackController.requestedMediaKey != mediaKey || playbackController.isOffline) return@onFailure
-                    Toast.makeText(this@VideoPlayerActivity, R.string.video_detail_load_failed, Toast.LENGTH_SHORT).show()
-                    finish()
+                    if (mediaKey.isAnimeKey()) {
+                        animeDetailFailed = true
+                        binding.title.setText(R.string.video_detail_load_failed)
+                        renderAnimePlaybackRetry()
+                    } else {
+                        Toast.makeText(this@VideoPlayerActivity, R.string.video_detail_load_failed, Toast.LENGTH_SHORT).show()
+                        finish()
+                    }
                 }
         }
     }
@@ -371,6 +386,11 @@ class VideoPlayerActivity : AppCompatActivity() {
             detail.updateMsg,
             getString(R.string.video_play_count, detail.playCount),
         ).joinToString(" / ")
+        if (detail.mediaKey.isAnimeKey() && detail.episodes.isEmpty()) {
+            binding.meta.setText(R.string.anime_empty_episodes)
+        } else if (detail.mediaKey.isAnimeKey()) {
+            binding.meta.text = detail.publishTime.orEmpty()
+        }
         binding.credits.text = listOfNotNull(
             detail.director?.takeIf(String::isNotBlank)?.let { getString(R.string.video_director, it) },
             detail.actor?.takeIf(String::isNotBlank)?.let { getString(R.string.video_cast, it) },
@@ -401,15 +421,16 @@ class VideoPlayerActivity : AppCompatActivity() {
         }
         binding.relatedRecycler.adapter = relatedAdapter
         relatedAdapter.submitList(if (playbackController.isOffline) emptyList() else detail.related)
-        binding.relatedRecycler.isVisible = !playbackController.isOffline
-        binding.relatedTitle.isVisible = !playbackController.isOffline
+        val anime = detail.mediaKey.isAnimeKey()
+        binding.relatedRecycler.isVisible = !playbackController.isOffline && !anime
+        binding.relatedTitle.isVisible = !playbackController.isOffline && !anime
 
         val commentAdapter = CommentAdapter()
         binding.commentRecycler.adapter = commentAdapter
-        binding.commentRecycler.isVisible = !playbackController.isOffline
-        binding.commentTitle.isVisible = !playbackController.isOffline
+        binding.commentRecycler.isVisible = !playbackController.isOffline && !anime
+        binding.commentTitle.isVisible = !playbackController.isOffline && !anime
         commentAdapter.submitList(if (playbackController.isOffline) emptyList() else AppGraph.catalogRepository.getComments(detail.mediaKey))
-        binding.downloadButton.isVisible = !playbackController.isOffline
+        binding.downloadButton.isVisible = !playbackController.isOffline && !anime
         binding.favoriteButton.isVisible = !playbackController.isOffline
     }
 
@@ -423,14 +444,14 @@ class VideoPlayerActivity : AppCompatActivity() {
             detail.typeName,
             detail.publishTime,
             detail.updateMsg,
-            getString(R.string.video_play_count, detail.playCount),
+            if (!detail.mediaKey.isAnimeKey()) getString(R.string.video_play_count, detail.playCount) else null,
             getString(R.string.video_stream_loading),
         ).joinToString(" / ")
         playbackJob = lifecycleScope.launch {
             handleEpisodeResult(playbackController.loadEpisode(detail, episode, resumePositionMs))
             binding.meta.text = listOfNotNull(
                 detail.typeName, detail.publishTime, detail.updateMsg,
-                getString(R.string.video_play_count, detail.playCount),
+                if (!detail.mediaKey.isAnimeKey()) getString(R.string.video_play_count, detail.playCount) else null,
             ).joinToString(" / ")
         }
     }
@@ -449,11 +470,45 @@ class VideoPlayerActivity : AppCompatActivity() {
             EpisodeSwitchResult.Failed -> {
                 resetFullscreenLock()
                 if (playbackController.hasOfflinePlaybackError) showOfflinePlaybackError()
+                else if (playbackController.requestedMediaKey?.isAnimeKey() == true) renderAnimePlaybackRetry()
                 else Toast.makeText(this, R.string.video_stream_load_failed, Toast.LENGTH_SHORT).show()
             }
             EpisodeSwitchResult.Unavailable -> Unit
         }
         updateEpisodeButtons()
+    }
+
+    private fun renderAnimePlaybackRetry() {
+        val mediaKey = intent.getStringExtra(EXTRA_MEDIA_KEY).orEmpty()
+        val failure = playbackController.animePlaybackFailure
+        val activeError = playbackController.activeSession?.detail?.mediaKey == mediaKey &&
+            playbackController.hasPlaybackError
+        val message = when {
+            !mediaKey.isAnimeKey() || !ownsPlaybackSelection() ||
+                playbackController.isLoading || restorePipLayout != null -> null
+            animeDetailFailed -> R.string.anime_detail_retry
+            failure?.noSource == true -> R.string.anime_no_source_retry
+            failure != null || activeError -> R.string.anime_play_retry
+            else -> null
+        }
+        binding.animePlaybackRetry.isVisible = message != null
+        if (message != null) binding.animePlaybackRetry.setText(message)
+    }
+
+    private fun retryAnimePlayback() {
+        if (!ownsPlaybackSelection() || playbackController.isLoading) return
+        val mediaKey = intent.getStringExtra(EXTRA_MEDIA_KEY).orEmpty()
+        if (!mediaKey.isAnimeKey()) return
+        if (animeDetailFailed) {
+            loadDetail(mediaKey)
+            return
+        }
+        val currentDetail = detail ?: return
+        val active = playbackController.activeSession?.takeIf { it.detail.mediaKey == mediaKey }
+        val failure = playbackController.animePlaybackFailure
+        val episode = failure?.episode ?: active?.episode ?: return
+        val resume = failure?.resumePositionMs ?: playbackController.currentPositionMs
+        loadEpisodePlayback(currentDetail, episode, resume)
     }
 
     private fun updateEpisodeButtons() {
@@ -639,6 +694,7 @@ class VideoPlayerActivity : AppCompatActivity() {
             ViewCompat.requestApplyInsets(page)
         }
         hiddenViews.forEach { it.isVisible = false }
+        renderAnimePlaybackRetry()
         binding.playerGestureFeedback.isVisible = false
         binding.root.removeCallbacks(gestureFeedbackHideRunnable)
         sleepTimerDialog?.dismiss()
@@ -660,6 +716,7 @@ class VideoPlayerActivity : AppCompatActivity() {
         val restore = restorePipLayout ?: return
         restorePipLayout = null
         restore()
+        renderAnimePlaybackRetry()
     }
 
     private fun enterSystemPictureInPicture(): Boolean {

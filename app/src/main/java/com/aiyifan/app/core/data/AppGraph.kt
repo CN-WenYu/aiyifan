@@ -1,6 +1,13 @@
 package com.aiyifan.app.core.data
 
 import android.content.Context
+import com.aiyifan.app.BuildConfig
+import com.aiyifan.app.core.data.anime.AnimeCatalog
+import com.aiyifan.app.core.data.anime.AnimeCatalogRepository
+import com.aiyifan.app.core.data.anime.AnimeExploreRepository
+import com.aiyifan.app.core.data.anime.BangumiClient
+import com.aiyifan.app.core.data.anime.HttpsAnimeTransport
+import com.aiyifan.app.core.data.anime.XifanSource
 import com.aiyifan.app.core.data.remote.ChannelNavigationRepository
 import com.aiyifan.app.core.data.remote.RemoteCatalogRepository
 import com.aiyifan.app.core.data.remote.RemoteConfigResolver
@@ -15,17 +22,26 @@ object AppGraph {
         ChannelNavigationRepository()
     }
 
+    internal val animeCatalog by lazy {
+        val transport = HttpsAnimeTransport()
+        AnimeCatalog(BangumiClient(transport), XifanSource(transport))
+    }
+
+    internal val animeExplore by lazy { AnimeExploreRepository(HttpsAnimeTransport()) }
+
     val catalogRepository: CatalogRepository by lazy {
-        RemoteCatalogRepository(
+        val favorites = SharedPreferencesFavoriteStore(
+            applicationContext.getSharedPreferences("favorites", Context.MODE_PRIVATE),
+        )
+        val remote = RemoteCatalogRepository(
             configResolver = RemoteConfigResolver(UrlConnectionHttpFetcher()),
             fetcher = UrlConnectionHttpFetcher(),
-            favoriteStore = SharedPreferencesFavoriteStore(
-                applicationContext.getSharedPreferences("favorites", Context.MODE_PRIVATE),
-            ),
+            favoriteStore = favorites,
             historyStore = SharedPreferencesWatchHistoryStore(
                 applicationContext.getSharedPreferences("watch_history", Context.MODE_PRIVATE),
             ),
         )
+        AnimeCatalogRepository(remote, animeCatalog, favorites, BuildConfig.ANIME_ENABLED)
     }
 
     fun initialize(context: Context) {

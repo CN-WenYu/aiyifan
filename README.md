@@ -5,6 +5,7 @@
 ## Android 功能
 
 - **发现视频** — 浏览首页推荐、分类、热门和短剧，按关键词搜索视频。
+- **追番** — 在底部「追番」探索热门番剧、新番时间表和推荐，也可以搜索 Bangumi 动画条目。使用 Animeko 订阅中的稀饭动漫 Next 片源在应用内播放正片。收藏和观看进度保存在本机。
 - **观看视频** — 查看影片详情、选集和全屏播放，支持手势操作、画中画、悬浮播放、定时关闭和自动跳过片头片尾。
 - **接着看** — 首页提供继续观看入口，观看历史、播放进度和收藏保存在本机。
 - **离线观看** — 下载剧集后离线播放，也可浏览并播放设备上的本地视频。
@@ -27,6 +28,8 @@
 ## 构建配置与检查
 
 Android 使用 Kotlin、XML 布局和 View Binding。播放和离线下载基于 AndroidX Media3，图片加载使用 Glide。
+
+追番入口默认启用，可用 Gradle 参数 `-PenableAnime=false` 构建关闭追番的版本。Android 7 的 Bangumi API 和封面 HTTPS 请求使用 [ISRG Root X1 公共根证书](https://letsencrypt.org/certificates/) 补足系统信任链。
 
 构建优先读取 `app-config.gradle`，文件缺失时使用 [示例配置](app-config.gradle.example)。调试构建使用默认调试签名。如需自定义包名、版本或构建发布包，可在本机编辑 `app-config.gradle`。发布构建需要填写 `STORE_PATH`、`STORE_PASSWORD`、`KEY_ALIAS` 和 `KEY_PASSWORD`，请将签名文件和凭据留在本机。
 

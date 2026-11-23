@@ -35,7 +35,12 @@ class ShortDramaDeviceTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val tabs = activity.findViewById<TabLayout>(R.id.bottomTabs)
-                assertEquals(listOf("首页", "短剧", "下载", "我的"), (0 until tabs.tabCount).map { tabs.getTabAt(it)?.text.toString() })
+                val expected = if (com.aiyifan.app.BuildConfig.ANIME_ENABLED) {
+                    listOf("首页", "短剧", "追番", "下载", "我的")
+                } else {
+                    listOf("首页", "短剧", "下载", "我的")
+                }
+                assertEquals(expected, (0 until tabs.tabCount).map { tabs.getTabAt(it)?.text.toString() })
                 tabs.getTabAt(MainActivity.TAB_MINE)!!.select()
                 activity.supportFragmentManager.executePendingTransactions()
                 val rows = activity.findViewById<android.view.ViewGroup>(R.id.contentGroup)

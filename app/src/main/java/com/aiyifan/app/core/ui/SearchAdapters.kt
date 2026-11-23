@@ -46,6 +46,7 @@ class SearchSuggestionAdapter(
 }
 
 class SearchResultAdapter(
+    private val anime: Boolean = false,
     private val onClick: (VideoSummary) -> Unit,
 ) : RecyclerView.Adapter<SearchResultAdapter.ResultViewHolder>() {
     private val items = mutableListOf<VideoSummary>()
@@ -57,7 +58,7 @@ class SearchResultAdapter(
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ResultViewHolder =
-        ResultViewHolder(ItemSearchResultBinding.inflate(LayoutInflater.from(parent.context), parent, false), onClick)
+        ResultViewHolder(ItemSearchResultBinding.inflate(LayoutInflater.from(parent.context), parent, false), anime, onClick)
 
     override fun onBindViewHolder(holder: ResultViewHolder, position: Int) = holder.bind(items[position])
 
@@ -65,6 +66,7 @@ class SearchResultAdapter(
 
     class ResultViewHolder(
         private val binding: ItemSearchResultBinding,
+        private val anime: Boolean,
         private val onClick: (VideoSummary) -> Unit,
     ) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: VideoSummary) {
@@ -101,6 +103,7 @@ class SearchResultAdapter(
                     .into(binding.poster)
             }
             binding.root.setOnClickListener { onClick(item) }
+            if (anime) binding.playButton.setText(R.string.anime_open_details)
             binding.playButton.setOnClickListener { onClick(item) }
             binding.viewAllButton.setOnClickListener { onClick(item) }
         }

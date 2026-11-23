@@ -32,6 +32,15 @@
             </LinearLayout>
 
 
+            <Button
+                android:id="@+id/animePlaybackRetry"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:accessibilityLiveRegion="polite"
+                android:text="@string/anime_play_retry"
+                android:visibility="gone" />
+
             <TextView android:id="@+id/nextEpisodeHint"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_gravity="top|center_horizontal" android:layout_marginTop="50dp"

@@ -1,6 +1,7 @@
 package com.aiyifan.app.feature.video
 
 import com.aiyifan.app.core.data.FakeCatalogRepository
+import com.aiyifan.app.core.data.anime.AnimeSourceUnavailable
 import com.aiyifan.app.core.model.Episode
 import com.aiyifan.app.core.model.VideoDetail
 import kotlinx.coroutines.runBlocking
@@ -57,6 +58,30 @@ class VideoPlaybackControllerTest {
         assertEquals(null, controller.pendingEpisode)
         assertEquals("first", selections.last())
         assertFalse(controller.isLoading)
+    }
+
+    @Test
+    fun `anime retry retains the saved position when the first request cannot resolve a source`() = runBlocking {
+        val episode = sampleEpisode(key = "bangumi:42")
+        val detail = sampleDetail(listOf(episode)).copy(mediaKey = "bangumi:14")
+        var hasSource = false
+        val repository = object : CatalogRepository by FakeCatalogRepository() {
+            override suspend fun resolvePlayback(detail: VideoDetail, episode: Episode, forceRefresh: Boolean): Episode {
+                if (!hasSource) throw AnimeSourceUnavailable()
+                return episode
+            }
+        }
+        val engine = FakePlaybackEngine()
+        val controller = VideoPlaybackController(engine, repository, FakePlaybackSession())
+        controller.openVideo(detail.mediaKey)
+
+        assertEquals(EpisodeSwitchResult.Failed, controller.loadEpisode(detail, episode, 17_000L))
+        val failure = checkNotNull(controller.animePlaybackFailure)
+        assertTrue(failure.noSource)
+        hasSource = true
+        assertTrue(controller.loadEpisode(detail, failure.episode, failure.resumePositionMs) is EpisodeSwitchResult.Switched)
+        assertEquals(17_000L, engine.currentPosition)
+        assertEquals(null, controller.animePlaybackFailure)
     }
 
     @Test

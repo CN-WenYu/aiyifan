@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:minHeight="@dimen/dp_48"
+        android:paddingEnd="@dimen/dp_6"
+        android:paddingStart="@dimen/dp_6">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/anime_trending"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/anime_section_text_size"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/animeSchedule"
+            style="@style/AnimeExploreAction"
+            android:text="@string/anime_airing_schedule" />
+
+        <TextView
+            android:id="@+id/animeRanking"
+            style="@style/AnimeExploreAction"
+            android:text="@string/anime_trending_more" />
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/animeTrendingList"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:nestedScrollingEnabled="false" />
+
+    <include
+        android:id="@+id/animeTrendingStatus"
+        layout="@layout/item_anime_load_state" />
+
+    <TextView
+        style="@style/AnimeExploreSectionTitle"
+        android:text="@string/continue_watching" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/animeContinueList"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:nestedScrollingEnabled="false"
+        android:paddingEnd="@dimen/dp_6"
+        android:paddingStart="@dimen/dp_6" />
+
+    <TextView
+        android:id="@+id/animeHistoryEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:minHeight="@dimen/dp_48"
+        android:paddingEnd="@dimen/dp_6"
+        android:paddingStart="@dimen/dp_6"
+        android:text="@string/history_empty"
+        android:textColor="@color/text_secondary"
+        android:textSize="@dimen/sp_14" />
+
+    <TextView
+        style="@style/AnimeExploreSectionTitle"
+        android:text="@string/anime_recommended" />
+</LinearLayout>
